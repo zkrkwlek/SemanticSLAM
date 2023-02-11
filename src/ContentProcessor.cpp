@@ -1,7 +1,6 @@
 #include "ContentProcessor.h"
 #include <Utils.h>
 #include <User.h>
-#include <Map.h>
 
 namespace SemanticSLAM {
 	std::atomic<int> ContentProcessor::nContentID = 0;
@@ -315,10 +314,6 @@ namespace SemanticSLAM {
 			pUser->mnUsed--;
 			return;
 		}*/
-
-		auto pMap = SLAM->GetMap(pUser->mapName);
-		auto KFs = pMap->GetAllKeyFrames();
-		
 
 		cv::Mat X = data.rowRange(0, 3).clone();
 		auto pNewContent = new Content(X, user, mid);
