@@ -1,7 +1,7 @@
 #include <MarkerProcessor.h>
 #include <Windows.h>
 #include <SLAM.h>
-#include <KeyFrame.h>
+
 #include <MapPoint.h>
 #include <User.h>
 #include <Camera.h>
@@ -33,6 +33,9 @@ namespace SemanticSLAM {
 	
 	ConcurrentMap<int, bool>	MapDynamicMarker;
 	ConcurrentMap<int, cv::Mat> MapMarkerPos;
+	////키프레임으로 할지, 집합으로 할지 고민 중
+	ConcurrentMap<int, std::set<EdgeSLAM::KeyFrame*>> MarkerProcessor::MapMarkerKFs;
+	//ConcurrentMap<int, EdgeSLAM::KeyFrame*> MarkerProcessor::MapMarkerKFs;
 	ConcurrentMap<int, SemanticSLAM::Content*> MapContents;
 	ConcurrentMap<int, std::chrono::high_resolution_clock::time_point> MapMarkerStart;
 	
@@ -777,14 +780,28 @@ namespace SemanticSLAM {
 								SLAM->TemporalDatas2.Update("marker", mapDatas);
 								////슬램 시각화용 마커 데이터 추가
 
+								////키프레임 연결하기.
+								//일단 연결하고 패스가 생성되면 패스 끝까지 갈 수 있도록 하기.
+								{
+									auto spLocalKFs = pUser->mSetLocalKeyFrames.Get();
+									if(!spLocalKFs.count(pKF))
+										spLocalKFs.insert(pKF);
+									MapMarkerKFs.Update(pMarker->mnId, spLocalKFs);
+									//MapMarkerKFs.Update(pMarker->mnId, pKF);
+									
+								}
+								////키프레임 연결하기.
+
 								////패스 테스트
 								int prevID = pMarker->mnId - 1;
 								int nextID = pMarker->mnId + 1;
 								int pathid = -1;
+								int pathEndID = -1;
 								cv::Mat pathData = cv::Mat::zeros(0, 1, CV_32FC1);
 								bool bPath = false;
 								if (MapMarkerPos.Count(prevID)) {
 									pathid = prevID;
+									pathEndID = pMarker->mnId;
 									cv::Mat Xp = MapMarkerPos.Get(prevID).rowRange(0, 3);
 									pathData.push_back(Xp);
 									pathData.push_back(X);
@@ -792,6 +809,7 @@ namespace SemanticSLAM {
 								}
 								if (MapMarkerPos.Count(nextID)) {
 									pathid = pMarker->mnId;
+									pathEndID = nextID;
 									cv::Mat Xn = MapMarkerPos.Get(nextID).rowRange(0, 3);
 									pathData.push_back(X);
 									pathData.push_back(Xn);
@@ -805,7 +823,8 @@ namespace SemanticSLAM {
 										mapDatas = SLAM->TemporalDatas2.Get("path");
 									mapDatas[pathid] = pathData;
 									SLAM->TemporalDatas2.Update("path", mapDatas);
-									ContentProcessor::PathContentRegistration(SLAM, pKF, user, pathData, 0);
+									//MarkerGraphTraverse(pathid, pathEndID);
+									ContentProcessor::PathContentRegistration(SLAM, pathid, pathEndID, user, pathData, 0);
 								}
 								////패스 테스트
 							}
@@ -1114,4 +1133,30 @@ namespace SemanticSLAM {
 		}
 		pUser->mnUsed--;
 	}
+
+	//std::vector<EdgeSLAM::KeyFrame*> MarkerProcessor::MarkerGraphTraverse(int startID, int endID) {
+	//	//auto 
+	//	auto pKFstart = MapMarkerKFs.Get(startID);
+	//	auto pKFend   = MapMarkerKFs.Get(endID);
+
+	//	//마지막 키프레임의 인접 키프레임 추가하기
+	//	std::set<EdgeSLAM::KeyFrame*> spKFs;
+	//	for (auto iter = spKFs.begin(), iend = spKFs.end(); iter != iend; iter++) {
+	//		//인접 얻기
+	//		auto pKF = *iter;
+	//		if (!pKF)
+	//			break;
+	//		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(20);
+	//		//추가하기
+	//		for (auto jter = vpLocalKFs.begin(), jend = vpLocalKFs.end(); jter != jend; jter++) {
+	//			auto pKFj = *jter;
+	//			if (spKFs.count(pKFj))
+	//				continue;
+	//		}
+	//		if (pKF == pKFend)
+	//			break;
+	//		//iter가 pKFend이면 멈추기
+	//	}
+	//	return std::vector<EdgeSLAM::KeyFrame*>(spKFs.begin(),spKFs.end());
+	//}
 }

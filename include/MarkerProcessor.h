@@ -7,6 +7,7 @@
 #include <opencv2/aruco.hpp>
 #include <WebAPI.h>
 #include <SLAM.h>
+#include <KeyFrame.h>
 #include <Utils.h>
 #include <ArucoMarker.h>
 #include <Marker.h>
@@ -26,6 +27,11 @@ namespace SemanticSLAM {
 
 		static void MarkerEventDetect(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void MarkerRegistration(EdgeSLAM::SLAM* SLAM, std::string user, int id, float len, float inc);
+
+		//static std::vector<EdgeSLAM::KeyFrame*> MarkerGraphTraverse(int startID, int endID);
+	public:
+		//static ConcurrentMap<int, EdgeSLAM::KeyFrame*> MapMarkerKFs;
+		static ConcurrentMap<int, std::set< EdgeSLAM::KeyFrame*>> MapMarkerKFs;
 	};
 }
 

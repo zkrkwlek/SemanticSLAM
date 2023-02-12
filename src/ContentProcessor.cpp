@@ -1,6 +1,7 @@
 #include "ContentProcessor.h"
 #include <Utils.h>
 #include <User.h>
+#include "MarkerProcessor.h"
 
 namespace SemanticSLAM {
 	std::atomic<int> ContentProcessor::nContentID = 0;
@@ -176,6 +177,7 @@ namespace SemanticSLAM {
 			data.push_back(pContent->attribute);
 			data.push_back(pContent->pos);
 			data.push_back(pContent->endPos);
+			//방향 추가해야 함.
 		}
 		cv::Mat temp = cv::Mat::zeros(1000 - data.rows, 1, CV_32FC1);
 		data.push_back(temp);
@@ -303,7 +305,7 @@ namespace SemanticSLAM {
 
 		return pNewContent->mnID;
 	}
-	int ContentProcessor::PathContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid) {
+	int ContentProcessor::PathContentRegistration(EdgeSLAM::SLAM* SLAM, int sid, int eid, std::string user, cv::Mat data, int mid) {
 
 		auto pUser = SLAM->GetUser(user);
 		/*if (!pUser)
@@ -324,9 +326,59 @@ namespace SemanticSLAM {
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
 		//두 지점 사이의 키프레임을 추가하도록 하기
 		
-		auto vpLocalKFs = pUser->mSetLocalKeyFrames.Get();
-		//std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(20);
-		//vpLocalKFs.push_back(pKF);
+		std::map<int, cv::Mat> mapDatas;
+		if (SLAM->TemporalDatas2.Count("pathpos"))
+			mapDatas = SLAM->TemporalDatas2.Get("pathpos");
+
+		//auto vpLocalKFs = pUser->mSetLocalKeyFrames.Get();
+		////std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(20);
+		////vpLocalKFs.push_back(pKF);
+		std::set<EdgeSLAM::KeyFrame*> spStartKFs = MarkerProcessor::MapMarkerKFs.Get(sid);
+		std::set<EdgeSLAM::KeyFrame*> spEndKFs = MarkerProcessor::MapMarkerKFs.Get(eid);
+
+		//마지막 키프레임의 인접 키프레임 추가하기
+		std::set<EdgeSLAM::KeyFrame*> spKFs;
+		{
+			auto spLocalKFs = spStartKFs;
+			for (auto iter = spLocalKFs.begin(), iend = spLocalKFs.end(); iter != iend; iter++) {
+				//인접 얻기
+				auto pKFi = *iter;
+				if (spKFs.count(pKFi))
+					continue;
+				spKFs.insert(pKFi);
+				mapDatas[pKFi->mnId] = pKFi->GetCameraCenter();
+			}
+			spLocalKFs = spEndKFs;
+			for (auto iter = spLocalKFs.begin(), iend = spLocalKFs.end(); iter != iend; iter++) {
+				//인접 얻기
+				auto pKFi = *iter;
+				if (spKFs.count(pKFi))
+					continue;
+				spKFs.insert(pKFi);
+				mapDatas[pKFi->mnId] = pKFi->GetCameraCenter();
+			}
+		}
+		
+		for (auto iter = spKFs.begin(), iend = spKFs.end(); iter != iend; iter++) {
+			//인접 얻기
+			auto pKFi = *iter;
+			if (!pKFi)
+				continue;
+			std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKFi->GetBestCovisibilityKeyFrames(30);
+			//추가하기
+			for (auto jter = vpLocalKFs.begin(), jend = vpLocalKFs.end(); jter != jend; jter++) {
+				auto pKFj = *jter;
+				if (spKFs.count(pKFj))
+					continue;
+				spKFs.insert(pKFj);
+				mapDatas[pKFj->mnId] = pKFj->GetCameraCenter();
+			}
+			//iter가 pKFend이면 멈추기
+			/*if (pKFi == pKFend)
+				break;*/
+		}
+		SLAM->TemporalDatas2.Update("pathpos", mapDatas);
+		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = std::vector<EdgeSLAM::KeyFrame*>(spKFs.begin(), spKFs.end());
 
 		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
 			auto pKFi = *iter;
