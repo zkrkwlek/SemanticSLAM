@@ -45,7 +45,11 @@ namespace SemanticSLAM {
 		virtual ~PlaneEstRes();
 	public:
 		void SetData(); //데이터 넣으면 매트릭스도 생성.
+		void UpdateData();
+		void ConvertData();
+		void ConvertWallData(cv::Mat Rsp);
 		void AddData(EdgeSLAM::MapPoint* pMP);
+		void AddData(EdgeSLAM::MapPoint* pMP, const cv::Mat& t, int inc = 0);
 	public:
 		bool bres;
 		cv::Mat param;
@@ -54,6 +58,9 @@ namespace SemanticSLAM {
 		cv::Mat data;
 		std::vector<EdgeSLAM::MapPoint*> vecMPs;
 		std::set<EdgeSLAM::MapPoint*> setMPs;
+		int nScore;
+		int nPlaneID;
+		std::atomic<int> nData;
 	};
 
 	class Plane {
@@ -67,13 +74,14 @@ namespace SemanticSLAM {
 		float dist;
 		PlaneType type; //같은 타입끼리 연결이 되도록하기.
 		PlaneStatus status;
-		uchar count; //N까지 초기화 전에 일정 누적이 되어야 함.
+		int count; //N까지 초기화 전에 일정 누적이 되어야 함. 
 		ConcurrentSet<EdgeSLAM::KeyFrame*> mKFObs; //local map의 kf와는 다름.
 		ConcurrentMap<PlaneType, std::set<Plane*>> mPlaneObs; //벽의 경우 여러개 가능함. 통로 등에 의해. 바닥, 천장, 평행 벽은 1개, 수직벽은 여러개
 		ConcurrentSet<EdgeSLAM::MapPoint*> mSetMPs;
 		ConcurrentSet<int> mSetIdxs;
 		bool label;
 		cv::Mat line;
+		int nScore;
 
 	private:
 	};
@@ -83,6 +91,7 @@ namespace SemanticSLAM {
 		PlaneEstimator();
 		virtual ~PlaneEstimator();
 	public:
+		static void Init();
 		static void PlaneEstimation(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void UpdateLocalMapPlanes(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		//static void EstimateLocalMapPlanes(EdgeSLAM::SLAM* system, std::string user, int id);
@@ -106,19 +115,32 @@ namespace SemanticSLAM {
 		static float HoughBinAngle;
 		static int HistSize;
 		static bool calcUnitNormalVector(cv::Mat& X);
+		static cv::Mat EstimatePlaneParam(const cv::Mat& data, int dim);
+		static cv::Mat CalculateResidual(const cv::Mat& data, const cv::Mat& param, float thresh);
+		static void UpdateInlier(PlaneEstRes* src, const cv::Mat& data, const cv::Mat& param, const cv::Mat& residual, PlaneEstRes* inlier, PlaneEstRes* outlier, int inc = 0);
 	public:
 		static cv::Point calcSphericalCoordinate(cv::Mat normal);
 		static int ConvertSphericalToIndex(cv::Point norm);
 		static cv::Point ConvertIndexToSphericalNorm(int idx);
+		static void SaveNormal();
 	public:
 
 		static ConcurrentMap<EdgeSLAM::KeyFrame*, std::set<Plane*>> mPlaneConnections;
 		static ConcurrentMap<int, int> GlobalNormalCount;
+		static ConcurrentMap<int, PlaneEstRes*> GlobalNormalMPs;
 		
 		static std::atomic<int> nPlaneID;
 		static ConcurrentMap<int, Plane*> GlobalMapPlanes;
 		//static ConcurrentMap<EdgeSLAM::KeyFrame*, LocalStructModel*> LocalKeyFrameModel;
 		static PlaneEstRes *FloorAllData, *CeilAllData;
+
+		static Plane* GlobalFloor;
+		static Plane* GlobalCeil;
+
+		static bool cmp(const std::pair<int, PlaneEstRes*>& a, const std::pair<int, PlaneEstRes*>&b) {
+			return a.second->nData > b.second->nData;
+		}
+
 	};
 }
 
