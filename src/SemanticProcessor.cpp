@@ -7,6 +7,7 @@
 #include <MapPoint.h>
 
 #include <SemanticLabel.h>
+#include <PlaneEstimator.h>
 #include<GridCell.h>
 
 namespace SemanticSLAM {
@@ -55,17 +56,96 @@ namespace SemanticSLAM {
 
 	}
 
+	void SemanticProcessor::SendLocalMap(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
+		auto pUser = SLAM->GetUser(user);
+		if (!pUser)
+			return;
+		auto pKF = pUser->mpRefKF;
+		if (!pKF)
+			return;
+
+		pUser->mnUsed++;
+
+		auto spLocalKFs = pUser->mSetLocalKeyFrames.Get();
+		auto vpLocalKFs = std::vector<EdgeSLAM::KeyFrame*>(spLocalKFs.begin(), spLocalKFs.end());
+		std::set<EdgeSLAM::MapPoint*> spMPs;
+		std::vector<EdgeSLAM::MapPoint*> vpLocalMPs;
+
+		cv::Mat pts = cv::Mat::zeros(0, 1, CV_32FC1);
+		cv::Mat desc = cv::Mat::zeros(0,1, CV_8UC1);
+
+		int nInput = 0;
+
+		for (std::vector<EdgeSLAM::KeyFrame*>::const_iterator itKF = vpLocalKFs.begin(), itEndKF = vpLocalKFs.end(); itKF != itEndKF; itKF++)
+		{
+			EdgeSLAM::KeyFrame* pKFi = *itKF;
+			if (!pKFi)
+				continue;
+			const std::vector<EdgeSLAM::MapPoint*> vpMPs = pKFi->GetMapPointMatches();
+
+			int nInputTemp = 0;
+			for (std::vector<EdgeSLAM::MapPoint*>::const_iterator itMP = vpMPs.begin(), itEndMP = vpMPs.end(); itMP != itEndMP; itMP++)
+			{
+				EdgeSLAM::MapPoint* pMPi = *itMP;
+				if (!pMPi || pMPi->isBad() || spMPs.count(pMPi))
+					continue;
+				vpLocalMPs.push_back(pMPi);
+				spMPs.insert(pMPi);
+				pts.push_back(pMPi->GetWorldPos());
+				desc.push_back(pMPi->GetDescriptor().t());
+
+				if (nInput == 0) {
+					nInputTemp += 52;
+				}
+			}
+			if (nInput == 0)
+				nInput = nInputTemp;
+		}
+		pUser->mnUsed--;
+
+		cv::Mat converted_desc = cv::Mat::zeros(vpLocalMPs.size() * 8, 1, CV_32FC1);
+		std::memcpy(converted_desc.data, desc.data, desc.rows);
+		pts.push_back(converted_desc);
+		int nOutput = pts.rows * 4;
+		//std::cout << "3" <<" "<<vpLocalMPs.size()<<" "<<pts.rows<<" "<<desc.rows<<" "<<converted_desc.rows << std::endl;
+		
+		//입력 = id + 2d + 3d + desc = 4 + 8 + 12 + 32
+		//출력 = id + desc + 3d(여기도 원래 아이디가 포함되어야함)
+
+		{
+			std::stringstream ssfile1;
+			ssfile1 << "../bin/normal/base.txt";
+			std::ofstream f1;
+			f1.open(ssfile1.str().c_str(), std::ios_base::out | std::ios_base::app);
+			f1 << id << " " << nInput << " " << nOutput << std::endl;
+			f1.close();
+		}
+
+		{
+			WebAPI API("143.248.6.143", 35005);
+			std::stringstream ss;
+			ss << "/Store?keyword=UpdatedLocalMap&id=" << id << "&src=" << user;
+			//std::chrono::high_resolution_clock::time_point s = std::chrono::high_resolution_clock::now();
+			auto res = API.Send(ss.str(), pts.data, pts.rows * sizeof(float));
+			//std::chrono::high_resolution_clock::time_point e = std::chrono::high_resolution_clock::now();
+		}
+	}
+
 	void SemanticProcessor::LabelMapPoint(EdgeSLAM::SLAM* SLAM, std::string user, int id, const cv::Mat& labeled) {
 		auto pUser = SLAM->GetUser(user);
 		if (!pUser)
 			return;
 		if (!pUser->KeyFrames.Count(id))
 			return;
-		pUser->mnUsed++;
+		if (!pUser->ImageDatas.Count(id))
+		{
+			return;
+		}
+		pUser->mnDebugLabel++;
+		//pUser->mnUsed++;
 		auto pKF = pUser->KeyFrames.Get(id);
-		
 		cv::Mat encoded = pUser->ImageDatas.Get(id);
-		cv::Mat img = cv::imdecode(encoded, cv::IMREAD_COLOR);
+		//cv::Mat img = cv::imdecode(encoded, cv::IMREAD_COLOR);
 
 		for (int i = 0, iend = pKF->N; i < iend; i++) {
 			auto pMPi = pKF->mvpMapPoints.get(i);
@@ -86,7 +166,36 @@ namespace SemanticSLAM {
 			if (pLabel->LabelCount.Count(label))
 				c = pLabel->LabelCount.Get(label);
 			pLabel->LabelCount.Update(label, c + 1);
-			cv::circle(img, pt, 3, SemanticColors[label], -1);
+
+			int n1 = 0;
+			int n2 = 0;
+			int n3 = 0;
+			if (pLabel->LabelCount.Count((int)StructureLabel::FLOOR))
+				n1 = pLabel->LabelCount.Get((int)StructureLabel::FLOOR);
+			if (pLabel->LabelCount.Count((int)StructureLabel::WALL))
+				n2 = pLabel->LabelCount.Get((int)StructureLabel::WALL);
+			if (pLabel->LabelCount.Count((int)StructureLabel::CEIL))
+				n3 = pLabel->LabelCount.Get((int)StructureLabel::CEIL);
+
+			auto val = std::max(std::max(n1, n2), n3);
+
+			if (val == n1) {
+				pMPi->mnLabelID = (int)StructureLabel::FLOOR;
+				//mapDatas[pMPi->mnId] = pMPi->GetWorldPos();
+				//labelDatas[pMPi->mnId] = cv::Mat::ones(1, 1, CV_8UC1)*(int)StructureLabel::FLOOR;
+			}
+			if (val == n2) {
+				pMPi->mnLabelID = (int)StructureLabel::WALL;
+				//mapDatas[pMPi->mnId] = pMPi->GetWorldPos();
+				//labelDatas[pMPi->mnId] = cv::Mat::ones(1, 1, CV_8UC1)*(int)StructureLabel::WALL;
+			}
+			if (val == n3) {
+				pMPi->mnLabelID = (int)StructureLabel::CEIL;
+				//mapDatas[pMPi->mnId] = pMPi->GetWorldPos();
+				//labelDatas[pMPi->mnId] = cv::Mat::ones(1, 1, CV_8UC1)*(int)StructureLabel::CEIL;
+			}
+
+			//cv::circle(img, pt, 3, SemanticColors[label], -1);
 		}
 		SemanticLabelImage.Update(id, labeled);
 		//EstimateLocalMapPlanes(SLAM, user, id);
@@ -99,7 +208,8 @@ namespace SemanticSLAM {
 		//	/////save image
 		//}
 
-		pUser->mnUsed--;
+		//pUser->mnUsed--;
+		pUser->mnDebugLabel--;
 	}
 	void SemanticProcessor::DownloadSuperPoint(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		
@@ -282,18 +392,52 @@ namespace SemanticSLAM {
 		//추가로 너무 긴 라인 제거하기
 
 		if(pUser->GetVisID()==0)
-			SLAM->VisualizeImage(img, 2);
+			SLAM->VisualizeImage(img, 3);
 		/*auto du_test1 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 		float t_test1 = du_test1 / 1000.0;
 		std::cout << "Opticalflow processing time = " << t_test1 << std::endl;*/
 		pUser->mnUsed--;
 	}
+	void SemanticProcessor::SimpleRecon(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
+		auto pUser = SLAM->GetUser(user);
+		if (!pUser)
+			return;
+		if (pUser->GetVisID() != 0)
+			return;
+		pUser->mnUsed++;
+		pUser->mnDebugSeg++;
+		std::stringstream ss;
+		ss << "/Load?keyword=Recon" << "&id=" << id << "&src=" << user;
+		WebAPI API("143.248.6.143", 35005);
+		auto res = API.Send(ss.str(), "");
+		int n2 = res.size();
 
+		cv::Mat temp = cv::Mat::zeros(n2, 1, CV_8UC1);
+		std::memcpy(temp.data, res.data(), res.size());
+		cv::Mat depth = cv::imdecode(temp, cv::IMREAD_UNCHANGED);
+
+		int w = depth.cols;
+		int h = depth.rows;
+
+		SLAM->VisualizeImage(depth, 0);
+
+		pUser->mnDebugSeg--;
+		pUser->mnUsed--;
+		//{
+		//	/////save image
+		//	std::stringstream sss;
+		//	sss << "../bin/img/" << user << "/Track/" << id << "_seg.jpg";
+		//	cv::imwrite(sss.str(), segcolor);
+		//	/////save image
+		//}
+
+	}
 	void SemanticProcessor::Segmentation(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		auto pUser = SLAM->GetUser(user);
 		if (!pUser)
 			return;
 		pUser->mnUsed++;
+		pUser->mnDebugSeg++;
 		std::stringstream ss;
 		ss << "/Load?keyword=Segmentation" << "&id=" << id << "&src=" << user;
 		WebAPI API("143.248.6.143", 35005);
@@ -323,6 +467,8 @@ namespace SemanticSLAM {
 		if(pUser->GetVisID()==0)
 			SLAM->VisualizeImage(segcolor, 1);
 		LabelMapPoint(SLAM, user, id, labeled);
+		PlaneEstimator::PlaneEstimation(SLAM, user, id);
+		pUser->mnDebugSeg--;
 		pUser->mnUsed--;
 		//{
 		//	/////save image
@@ -331,35 +477,42 @@ namespace SemanticSLAM {
 		//	cv::imwrite(sss.str(), segcolor);
 		//	/////save image
 		//}
+		
 	}
 	void SemanticProcessor::ObjectDetection(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		auto pUser = SLAM->GetUser(user);
 		if (!pUser)
 			return;
+		if (!pUser->ImageDatas.Count(id))
+		{
+			return;
+		}
 		pUser->mnUsed++;
+		pUser->mnDebugSeg++;
+
+		cv::Mat encoded = pUser->ImageDatas.Get(id);
+		int nVisID = pUser->GetVisID();
+
+		pUser->mnDebugSeg--;
+		pUser->mnUsed--;
+
 		std::stringstream ss;
 		ss << "/Load?keyword=ObjectDetection" << "&id=" << id << "&src=" << user;
 		WebAPI API("143.248.6.143", 35005);
 		auto res = API.Send(ss.str(), "");
+
 		int n2 = res.size();
 		int n = n2 / 24;
+
 		cv::Mat data = cv::Mat::zeros(n, 6, CV_32FC1);
 		std::memcpy(data.data, res.data(), res.size());
-
-		cv::Mat encoded = pUser->ImageDatas.Get(id);
 		cv::Mat img = cv::imdecode(encoded, cv::IMREAD_COLOR);
-
-		//{
-		//	/////save image
-		//	std::stringstream sss;
-		//	sss << "../bin/img/" << user << "/Track/" << id << "_ori.jpg";
-		//	cv::imwrite(sss.str(), img);
-		//	/////save image
-		//}
 
 		for (int j = 0; j < n; j++) {
 			int label = (int)data.at<float>(j, 0);
 			float conf = data.at<float>(j, 1);
+			if (conf < 0.6)
+				continue;
 			std::stringstream ss;
 			ss << vecStrObjectLabels[label] << "(" << conf << ")";
 			cv::Point2f left(data.at<float>(j, 2), data.at<float>(j, 3));
@@ -367,16 +520,13 @@ namespace SemanticSLAM {
 
 			rectangle(img, left, right, cv::Scalar(255, 255, 255));
 			cv::putText(img, ss.str(), cv::Point(left.x, left.y - 6), 1, 1.5, cv::Scalar::all(0));
-			std::cout <<label<<"="<< left << " " << right << std::endl;
+			//std::cout <<label<<"="<< left << " " << right << std::endl;
 		}
-		SLAM->VisualizeImage(img, 2);
+
+		if (nVisID == 0)
+			SLAM->VisualizeImage(img, 2);
+		//std::cout << "4" << std::endl;
 		
-		/*{
-			std::stringstream sss;
-			sss << "../bin/img/" << user << "/Track/" << id << "_obj.jpg";
-			cv::imwrite(sss.str(), img);
-		}*/
-		pUser->mnUsed--;
 	}
 	void SemanticProcessor::DenseOpticalFlow(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 

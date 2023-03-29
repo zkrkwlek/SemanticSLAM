@@ -31,6 +31,7 @@ namespace SemanticSLAM {
 		//static std::vector<EdgeSLAM::KeyFrame*> MarkerGraphTraverse(int startID, int endID);
 	public:
 		//static ConcurrentMap<int, EdgeSLAM::KeyFrame*> MapMarkerKFs;
+		static ConcurrentMap<int, cv::Mat> MapMarkerPos;
 		static ConcurrentMap<int, std::set< EdgeSLAM::KeyFrame*>> MapMarkerKFs;
 	};
 }

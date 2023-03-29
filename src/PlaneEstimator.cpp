@@ -385,86 +385,18 @@ namespace SemanticSLAM {
 		pUser->mnDebugPlane++;
 		auto pKF = pUser->KeyFrames.Get(id);
 
-		//해당 키프레임의 세그멘테이션이 될 때까지 대기. 키프레임은 무조건 세그멘테이션이 되야 함.
-		//세그멘테이션 후에 동작하도록 변경하는게 나을듯
-		//230215 지금은 안쓰임.
-		/*while (!SemanticProcessor::SemanticLabelImage.Count(id)) {
-			continue;
-		}*/
-		//auto label = SemanticProcessor::SemanticLabelImage.Get(id);
-
 		//키프레임의 자세 획득
 		cv::Mat R = pKF->GetRotation();
 		cv::Mat t = pKF->GetTranslation();
 
 		//키프레임의 연결된 로컬 맵 획득
 		std::vector<EdgeSLAM::MapPoint*> vpLocalMPs;
-		//std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(20);
-		//vpLocalKFs.push_back(pKF);
 		auto spLocalKFs = pUser->mSetLocalKeyFrames.Get();
 		auto vpLocalKFs = std::vector<EdgeSLAM::KeyFrame*>(spLocalKFs.begin(), spLocalKFs.end());
 
-		//로컬 모델 생성 = 이전 키프레임들로부터 일단 평면 모델 가져오기
-		{
-			LocalStructModel* pLocalModel = new LocalStructModel();
-			std::map<int, Plane*> tempWallPlanes;
-			Plane* floor = nullptr;
-			{
-				//for (std::vector<EdgeSLAM::KeyFrame*>::const_iterator itKF = vpLocalKFs.begin(), itEndKF = vpLocalKFs.end(); itKF != itEndKF; itKF++)
-				//{
-				//	auto pKFi = *itKF;
-				//	pLocalModel->mapKFs[pKFi->mnId] = pKFi;
+		/////이 이후로 실제 평면 쓸일이 없음.
 
-				//	if (!LocalKeyFrameModel.Count(pKFi))
-				//		continue;
-				//	auto pTempModel = LocalKeyFrameModel.Get(pKFi);
-				//	for (auto iter = pTempModel->mapPlanes.begin(), iend = pTempModel->mapPlanes.end(); iter != iend; iter++) {
-				//		auto ptype = iter->first;
-				//		auto id = iter->second;
-				//		auto plane = GlobalMapPlanes.Get(id);
-				//		if (ptype == PlaneType::FLOOR || ptype == PlaneType::CEIL) {
-				//			pLocalModel->mapPlanes[ptype] = id;
-				//			if (ptype == PlaneType::FLOOR)
-				//				floor = plane;
-				//		}
-				//		else {
-				//			tempWallPlanes[id] = plane;
-				//		}
-				//	}
-				//	//현재 키프레임과 방향 비교
-				//	//std::cout<<"Dir = "<<pKFi->mnId<<"="<< calcSphericalCoordinate(pKFi->GetRotation().row(2).t())<<std::endl;
-				//}
 
-				/*if (floor) {
-				for (auto iter = tempWallPlanes.begin(), iend = tempWallPlanes.end(); iter != iend; iter++) {
-				auto wall = iter->second;
-				float m;
-				cv::Mat Lw = CalcFlukerLine(floor->param, wall->param);
-				cv::Mat line = LineProjection(R, t, Lw, pUser->mpCamera->Kfluker, m);
-				if (line.at<float>(0) < 0.0)
-				line *= -1.0;
-				wall->label = LineFunction(floor2D, line);
-
-				}
-				}*/
-			}
-			delete pLocalModel;
-			delete floor;
-		}
-		
-		
-		//현재 키프레임 추가
-		
-		//if (pLocalModel->mapKFs.size() > 0) {
-		//	auto prevKF =  pLocalModel->mapKFs.begin()->second;
-		//	auto prevDir = prevKF->GetRotation().row(2);//calcSphericalCoordinate(prevKF->GetRotation().row(2).t());
-		//	auto currDir = pKF->GetRotation().row(2);// calcSphericalCoordinate(pKF->GetRotation().row(2).t());
-		//	std::cout <<"ANGLE = "<< cv::norm(prevDir) << " " << cv::norm(currDir) << " " << acos(currDir.dot(prevDir) / (cv::norm(prevDir)*cv::norm(currDir)))*180.0 / CV_PI<<std::endl;
-		//	std::cout << "Dir = " << pKF->mnId <<", "<<prevKF->mnId<< "=" <<  " == "<< prevKF->GetRotation().row(2) <<"  "<< pKF->GetRotation().row(2) << std::endl;
-		//}
-		//pLocalModel->mapKFs[pKF->mnId] = pKF;
-		
-		
 		/////로컬 맵에서 맵포인트 모으기
 		std::set<EdgeSLAM::MapPoint*> spMPs;
 		Plane* maxFloor = nullptr;
@@ -512,22 +444,7 @@ namespace SemanticSLAM {
 
 		std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 
-		/*std::set<EdgeSLAM::MapPoint*> spFloorMPs, spWallMPs, spCeilMPs;
-		std::vector<EdgeSLAM::MapPoint*> vpFloorMPs, vpWallMPs, vpCeilMPs;
-
-		cv::Mat matFloorData = cv::Mat::zeros(0, 3, CV_32FC1);
-		cv::Mat matWallData = cv::Mat::zeros(0, 3, CV_32FC1);
-		cv::Mat matCeilData = cv::Mat::zeros(0, 3, CV_32FC1);*/
 		PlaneEstRes* WallLocalData = new PlaneEstRes();
-
-		//////레이블링 된 맵 포인트 데이터
-		//std::vector<cv::Mat> localWallDatas;
-		//std::map<int, cv::Mat> labelDatas;
-		//if (SLAM->TemporalDatas2.Count("label"))
-		//	labelDatas = SLAM->TemporalDatas2.Get("label");
-		//std::map<int, cv::Mat> mapDatas;
-		//if (SLAM->TemporalDatas2.Count("map"))
-		//	mapDatas = SLAM->TemporalDatas2.Get("map");
 
 		//최소 N번 이상 레이블 된 맵포인트들을 모음.
 		//한번은 우연하게 모일 수 있기 때문에
@@ -541,37 +458,11 @@ namespace SemanticSLAM {
 				continue;
 			auto pLabel = SemanticProcessor::SemanticLabels.Get(pMPi->mnId);
 			
-			/*int n1 = 0;
-			int n2 = 0;
-			int n3 = 0;
-			if (pLabel->LabelCount.Count((int)StructureLabel::FLOOR))
-				n1 = pLabel->LabelCount.Get((int)StructureLabel::FLOOR);
-			if (pLabel->LabelCount.Count((int)StructureLabel::WALL))
-				n2 = pLabel->LabelCount.Get((int)StructureLabel::WALL);
-			if (pLabel->LabelCount.Count((int)StructureLabel::CEIL))
-				n3 = pLabel->LabelCount.Get((int)StructureLabel::CEIL);
-			
-			auto val =  std::max(std::max(n1, n2),n3);
-
-			if (val == n1) {
-				mapDatas[pMPi->mnId] = pMPi->GetWorldPos();
-				labelDatas[pMPi->mnId] = cv::Mat::ones(1, 1, CV_8UC1)*(int)StructureLabel::FLOOR;
-			}
-			if (val == n2) {
-				mapDatas[pMPi->mnId] = pMPi->GetWorldPos();
-				labelDatas[pMPi->mnId] = cv::Mat::ones(1, 1, CV_8UC1)*(int)StructureLabel::WALL;
-			}
-			if (val == n3) {
-				mapDatas[pMPi->mnId] = pMPi->GetWorldPos();
-				labelDatas[pMPi->mnId] = cv::Mat::ones(1, 1, CV_8UC1)*(int)StructureLabel::CEIL;
-			}*/
-
 			if (pLabel->LabelCount.Count((int)StructureLabel::FLOOR) && pLabel->LabelCount.Get((int)StructureLabel::FLOOR) > THRESH) {
 				FloorAllData->AddData(pMPi);
 			}
 			if (pLabel->LabelCount.Count((int)StructureLabel::WALL) && pLabel->LabelCount.Get((int)StructureLabel::WALL) > THRESH) {
 				WallLocalData->AddData(pMPi);
-				//localWallDatas.push_back(pMPi->GetWorldPos());
 			}
 			if (pLabel->LabelCount.Count((int)StructureLabel::CEIL) && pLabel->LabelCount.Get((int)StructureLabel::CEIL) > THRESH) {
 				CeilAllData->AddData(pMPi);
@@ -582,12 +473,6 @@ namespace SemanticSLAM {
 		CeilAllData->SetData();
 		WallLocalData->SetData();
 
-		//SLAM->TemporalDatas.Update("wall", localWallDatas);
-		/*if (mapDatas.size() > 0) {
-			SLAM->TemporalDatas2.Update("map", mapDatas);
-			SLAM->TemporalDatas2.Update("label", labelDatas);
-		}*/
-		
 		{
 			
 			auto mapNormalCount = GlobalNormalCount.Get();
@@ -601,10 +486,6 @@ namespace SemanticSLAM {
 				bool bres = PlaneInitialization(FloorAllData, fInlier, fOutlier, 1500, 0.01, 0.2);
 				if (bres) {
 					 
-					//fInlier->param = EstimatePlaneParam(fInlier->data, 3);
-					//cv::Mat residual = CalculateResidual(temp->data, param2, thresh_distance);
-					//UpdateInlier(temp, temp->data, param2, residual, inlier, outlier,1);
-
 					Plane* floor = new Plane();
 					floor->type = PlaneType::FLOOR;
 					floor->param = fInlier->param.clone();

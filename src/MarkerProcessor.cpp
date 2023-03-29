@@ -32,10 +32,12 @@ void distortPoint(const cv::Point2f& xy, cv::Point2f& uv, const cv::Mat &M, cons
 namespace SemanticSLAM {
 	
 	ConcurrentMap<int, bool>	MapDynamicMarker;
-	ConcurrentMap<int, cv::Mat> MapMarkerPos;
+	ConcurrentMap<int, cv::Mat> MarkerProcessor::MapMarkerPos;
 	////키프레임으로 할지, 집합으로 할지 고민 중
 	ConcurrentMap<int, std::set<EdgeSLAM::KeyFrame*>> MarkerProcessor::MapMarkerKFs;
 	//ConcurrentMap<int, EdgeSLAM::KeyFrame*> MarkerProcessor::MapMarkerKFs;
+	
+	////사용 안함 이제
 	ConcurrentMap<int, SemanticSLAM::Content*> MapContents;
 	ConcurrentMap<int, std::chrono::high_resolution_clock::time_point> MapMarkerStart;
 	
@@ -652,12 +654,12 @@ namespace SemanticSLAM {
 			auto T = pUser->PoseDatas.Get(id);
 			cv::Mat Rslam = T.rowRange(0, 3).colRange(0, 3);
 			cv::Mat tslam = T.rowRange(0, 3).col(3);
-			//cv::Mat Tslaminv = cv::Mat::eye(4, 4, CV_32FC1); //pKF->GetPoseInverse();
-			//cv::Mat Rinv = Rslam.t();
-			//cv::Mat tinv = -Rinv*tslam;
-			//Rinv.copyTo(Tslaminv.rowRange(0, 3).colRange(0, 3));
-			//tinv.copyTo(Tslaminv.col(3).rowRange(0, 3));
-			//cv::Mat Ow = tinv.clone();// pUser->GetPosition();
+			cv::Mat Tslaminv = cv::Mat::eye(4, 4, CV_32FC1); //pKF->GetPoseInverse();
+			cv::Mat Rinv = Rslam.t();
+			cv::Mat tinv = -Rinv*tslam;
+			Rinv.copyTo(Tslaminv.rowRange(0, 3).colRange(0, 3));
+			tinv.copyTo(Tslaminv.col(3).rowRange(0, 3));
+			cv::Mat Ow = tinv.clone();// pUser->GetPosition();
 			
 			auto pMarker = vecMarkers[0];
 			//if (!MapMarkerPos.Count(pMarker->mnId))
@@ -721,11 +723,13 @@ namespace SemanticSLAM {
 					if (floor)
 						break;
 				}
+				if (PlaneEstimator::GlobalFloor->nScore > 0)
+					floor = PlaneEstimator::GlobalFloor;
 				if (floor) {
 					////컨시스턴시 체크
 					cv::Mat Kinv = pUser->GetCameraInverseMatrix();
-					cv::Mat Tslaminv = pKF->GetPoseInverse();
-					cv::Mat Ow = pUser->GetPosition();
+					//cv::Mat Tslaminv = pKF->GetPoseInverse();
+					//cv::Mat Ow = pUser->GetPosition();
 
 					cv::Mat param = floor->param.clone();
 					cv::Mat normal = floor->normal.clone();
@@ -846,6 +850,7 @@ namespace SemanticSLAM {
 
 								//cv::drawFrameAxes(res, K, D, rvec,tvec, 0.1);
 								//cv::drawFrameAxes(res, K, D, pMarker->rvec, pMarker->t, 0.1);
+								std::cout << xy << " " << pMarker->vecCorners[0] << std::endl;
 								cv::circle(res, xy, 3, cv::Scalar(0, 0, 255), -1);
 							}
 						}

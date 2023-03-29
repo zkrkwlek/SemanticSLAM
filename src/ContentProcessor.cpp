@@ -14,7 +14,7 @@ namespace SemanticSLAM {
 
 	//임시로 마커 아이디에 다른 타입이 들어감. 테스트 다시 해야 함. 드로우용 컨텐츠 생성하기 위해서
 	Content::Content(){}
-	Content::Content(cv::Mat _X, std::string _src, int _modelID):pos(_X), mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), endPos(cv::Mat::zeros(3,1,CV_32FC1)), attribute(cv::Mat::zeros(1,1,CV_32FC1)), mbMoving(false){}
+	Content::Content(cv::Mat _X, std::string _src, int _modelID):pos(_X), mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), endPos(cv::Mat::zeros(3,1,CV_32FC1)), attribute(cv::Mat::zeros(1,1,CV_32FC1)), mbMoving(false), mpPath(nullptr){}
 	Content::~Content(){
 		pos.release();
 		dir.release();
@@ -246,7 +246,16 @@ namespace SemanticSLAM {
 			return AllContentMap.Get(id);
 		return nullptr;
 	}
+	void ContentProcessor::ResetContent() {
+		AllContentMap.Clear();
+		ContentMap.Clear();
+		MarkerContentMap.Clear();
+		MapArucoMarkerPos.Clear();
+		AnchorIDs.Clear();
 
+		MarkerProcessor::MapMarkerKFs.Clear();
+		MarkerProcessor::MapMarkerPos.Clear();
+	}
 	int ContentProcessor::ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid) {
 				
 		cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
@@ -268,17 +277,17 @@ namespace SemanticSLAM {
 			ContentMap.Update(pKFi, mapContents);
 		}
 
-		/*{
+		{
 			std::map<int, cv::Mat> mapDatas;
 			if (SLAM->TemporalDatas2.Count("content"))
 				mapDatas = SLAM->TemporalDatas2.Get("content");
 			cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
 			X.at<float>(0) = data.at<float>(2);
-			X.at<float>(1) = data.at<float>(3);
+			X.at<float>(1) = -data.at<float>(3);
 			X.at<float>(2) = data.at<float>(4);
-			mapDatas[id] = X;
+			mapDatas[pNewContent->mnID] = X;
 			SLAM->TemporalDatas2.Update("content", mapDatas);
-		}*/
+		}
 
 		//std::cout << "temp content" << data.at<float>(0) << " " << data.at<float>(1) << " " << data.at<float>(5) << " " << data.at<float>(7) << " || " << data.at<float>(6) << " " << data.at<float>(8) << std::endl;
 		//std::cout << "temp content POS = " << data.at<float>(2) << " " << data.at<float>(3) << " " << data.at<float>(4) << " " << data.at<float>(5) << " " << data.at<float>(6) << std::endl;
@@ -322,6 +331,7 @@ namespace SemanticSLAM {
 
 		pNewContent->attribute.at<float>(0, 0) = 1.0;
 		pNewContent->endPos = data.rowRange(3,6).clone();
+		pNewContent->mpPath = new Path();
 
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
 		//두 지점 사이의 키프레임을 추가하도록 하기
@@ -392,10 +402,27 @@ namespace SemanticSLAM {
 		//pUser->mnUsed--;
 		return pNewContent->mnID;
 	}
+	void ContentProcessor::ManageMovingObj(EdgeSLAM::SLAM* SLAM, int id) {
+		auto C = AllContentMap.Get(id);
+		auto path = C->mpPath;
 
+		std::map<int, cv::Mat> mapDatas;
+		if (path) {
+			path->Init(C->pos, C->endPos);
+			path->MoveStart();
+			while (path->bMove) {
+				auto pos = path->Move();
+				//객체 등록
+				mapDatas[id] = pos;
+				SLAM->TemporalDatas2.Update("MovingObject", mapDatas);
+			}
+		}
+		mapDatas.clear();
+		SLAM->TemporalDatas2.Update("MovingObject", mapDatas);
+	}
 	void ContentProcessor::MovingObjectSync(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		if (AllContentMap.Count(id)) {
-
+			
 			cv::Mat data = cv::Mat::zeros(1000, 1, CV_32FC1);
 			data.at<float>(0) = id;
 			{
@@ -407,7 +434,7 @@ namespace SemanticSLAM {
 				std::chrono::high_resolution_clock::time_point e = std::chrono::high_resolution_clock::now();
 				delete mpAPI;
 			}
-						
+			SLAM->pool->EnqueueJob(ManageMovingObj, SLAM, id);
 		}
 		else {
 			std::cout << "error?" << std::endl;

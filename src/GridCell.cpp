@@ -63,9 +63,9 @@ namespace SemanticSLAM {
 	void GridCell::SetBadFlag(){
 		mbBad = true;
 	}
-	bool GridCell::isBad(){
+	/*bool GridCell::isBad(){
 		return mbBad.load();
-	}
+	}*/
 
 	GridFrame::GridFrame(){
 		mGrid = std::vector<std::vector<GridCell*>>(10);
@@ -84,7 +84,7 @@ namespace SemanticSLAM {
 				if (!pGC)
 					continue;
 				pGC->EraseObservation(this);
-				if (pGC->isBad())
+				if (pGC->mbBad)
 					delete pGC;
 			}
 			std::vector<GridCell*>().swap(mGrid[i]);

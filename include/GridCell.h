@@ -34,7 +34,7 @@ namespace SemanticSLAM {
 		void AddObservation(GridFrame* pGF, int idx);
 		void EraseObservation(GridFrame* pGF);
 		void SetBadFlag();
-		bool isBad();
+		//bool isBad();
 	public:
 		std::atomic<bool> mbBad;
 		cv::Point2f pt;

@@ -26,12 +26,13 @@ namespace SemanticSLAM {
 		static void DenseOpticalFlow(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void MultiViewStereo(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ObjectDetection(EdgeSLAM::SLAM* SLAM, std::string user, int id);
+		static void SimpleRecon(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void Segmentation(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void DownloadSuperPoint(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ShareSemanticInfo(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void MatchingSuperPoint(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void LabelMapPoint(EdgeSLAM::SLAM* SLAM, std::string user, int id, const cv::Mat& label);
-	
+		static void SendLocalMap(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 	public:
 		static ConcurrentMap<int, std::vector<cv::Point2f>> SuperPoints;
 		static ConcurrentMap<int, cv::Mat> SemanticLabelImage;

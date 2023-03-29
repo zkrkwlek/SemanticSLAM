@@ -11,7 +11,46 @@
 #include <KeyFrame.h>
 
 namespace SemanticSLAM {
+	class Path {
+	public:
+		float speed;
+		float length;
+		bool bMove;
+		std::chrono::high_resolution_clock::time_point start;
 
+		cv::Mat s, e;
+		void Init(cv::Mat start, cv::Mat end) {
+			auto diffMat = end - start;
+			length = sqrt(diffMat.dot(diffMat));
+			speed = 0.1f;
+			s = start;
+			e = end;
+		}
+		void MoveStart() {
+			start = std::chrono::high_resolution_clock::now();
+			bMove=true;
+		}
+		cv::Mat Move() {
+			if (bMove) {
+				auto curr = std::chrono::high_resolution_clock::now();
+				auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(curr - start).count();
+				float t_path = duration / 1000.0;
+
+				float distCovered = t_path*speed;
+				float fractionOfJourney = distCovered / length;
+
+				auto pos =  s + (e - s)*fractionOfJourney;
+
+				if (fractionOfJourney > 0.99f) {
+					MoveEnd();
+				}
+				return pos;
+			}
+		}
+		void MoveEnd() {
+			bMove = false;
+		}
+	};
 	class Content {
 	public:
 		Content();
@@ -26,6 +65,7 @@ namespace SemanticSLAM {
 		bool mbMoving;
 		int mnContentModelID;
 		std::string src;
+		Path* mpPath;
 	};
 	class ContentProcessor {
 	public:
@@ -33,6 +73,7 @@ namespace SemanticSLAM {
 		static void TestTouch(std::string user, int id);
 		static void UpdateLatency(std::string keyword, std::string user, int id);
 		/////////
+		static void ResetContent();
 		static void ShareContent(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ContentProcess(EdgeSLAM::SLAM* system, std::string user, int id, std::string kewword, int mid);
 		static int ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid);
@@ -40,6 +81,7 @@ namespace SemanticSLAM {
 		static int PathContentRegistration(EdgeSLAM::SLAM* SLAM, int sid, int eid, std::string user, cv::Mat data, int mid);
 		static Content* GetContent(int id);
 		static void MovingObjectSync(EdgeSLAM::SLAM* SLAM, std::string user, int id);
+		static void ManageMovingObj(EdgeSLAM::SLAM* SLAM, int id);
 		static void UpdateProcess(EdgeSLAM::SLAM* system, std::string user, int id);
 		/////////TEST
 		static void DirectTest(EdgeSLAM::SLAM* SLAM, std::string user, int id);
