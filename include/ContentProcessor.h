@@ -77,6 +77,8 @@ namespace SemanticSLAM {
 		static void ShareContent(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ContentProcess(EdgeSLAM::SLAM* system, std::string user, int id, std::string kewword, int mid);
 		static int ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid);
+		static void DrawContentProcess(EdgeSLAM::SLAM* system, std::string user, int id, std::string kewword, int mid);
+		static void DrawContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid);
 		static int MarkerContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int id);
 		static int PathContentRegistration(EdgeSLAM::SLAM* SLAM, int sid, int eid, std::string user, cv::Mat data, int mid);
 		static Content* GetContent(int id);

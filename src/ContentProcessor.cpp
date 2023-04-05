@@ -138,6 +138,7 @@ namespace SemanticSLAM {
 			pUser->mnUsed--;
 			return;
 		}
+		pUser->mnDebugAR++;
 		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(20);
 		vpLocalKFs.push_back(pKF);
 		auto pMap = SLAM->GetMap(pUser->mapName);
@@ -179,8 +180,11 @@ namespace SemanticSLAM {
 			data.push_back(pContent->endPos);
 			//방향 추가해야 함.
 		}
-		cv::Mat temp = cv::Mat::zeros(1000 - data.rows, 1, CV_32FC1);
-		data.push_back(temp);
+		if (data.rows < 500) {
+			cv::Mat temp = cv::Mat::zeros(1000 - data.rows, 1, CV_32FC1);
+			data.push_back(temp);
+		}
+		
 		{
 			WebAPI* mpAPI = new WebAPI("143.248.6.143", 35005);
 			std::stringstream ss;
@@ -212,8 +216,34 @@ namespace SemanticSLAM {
 			SLAM->VisualizeImage(img, pUser->GetVisID());
 		}*/
 		//std::cout << "ShareContent end" << std::endl;
+		pUser->mnDebugAR--;
 		pUser->mnUsed--;
 		
+	}
+
+	void ContentProcessor::DrawContentProcess(EdgeSLAM::SLAM* SLAM, std::string user, int id, std::string kewword, int mid) {
+		auto pUser = SLAM->GetUser(user);
+		if (!pUser)
+			return;
+		pUser->mnUsed++;
+		auto pKF = pUser->mpRefKF;
+		if (!pKF) {
+			pUser->mnUsed--;
+			return;
+		}
+		pUser->mnDebugAR++;
+		//auto pMap = SLAM->GetMap(pUser->mapName);
+		std::stringstream ss;
+		ss << "/Load?keyword=" << kewword << "&id=" << id << "&src=" << user;
+
+		WebAPI* mpAPI = new WebAPI("143.248.6.143", 35005);
+		auto res = mpAPI->Send(ss.str(), "");
+		int n2 = res.size();
+		
+		cv::Mat fdata = cv::Mat::zeros(n2/4, 1, CV_32FC1);
+		std::memcpy(fdata.data, res.data(), res.size());
+		DrawContentRegistration(SLAM, pKF, user, fdata, mid);
+		pUser->mnUsed--;
 	}
 	void ContentProcessor::ContentProcess(EdgeSLAM::SLAM* SLAM, std::string user, int id, std::string kewword, int mid) {
 		auto pUser = SLAM->GetUser(user);
@@ -255,6 +285,50 @@ namespace SemanticSLAM {
 
 		MarkerProcessor::MapMarkerKFs.Clear();
 		MarkerProcessor::MapMarkerPos.Clear();
+	}
+	void ContentProcessor::DrawContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid) {
+
+		int n = data.rows / 3;
+		std::vector<Content*> vpNewContents;
+		for (int i = 0; i < n; i++) {
+			cv::Mat X = data.rowRange(3 * i, 3 * i + 3);
+			auto pNewContent = new Content(X, user, mid);
+			pNewContent->attribute.at<float>(0, 0) = 2.0;
+			vpNewContents.push_back(pNewContent);
+			AllContentMap.Update(pNewContent->mnID, pNewContent);
+		}
+		
+		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(100);
+		vpLocalKFs.push_back(pKF);
+		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
+			auto pKFi = *iter;
+			std::map<int, Content*> mapContents;
+			if (ContentMap.Count(pKFi))
+				mapContents = ContentMap.Get(pKFi);
+			for (int i = 0; i < vpNewContents.size(); i++)
+			{
+				auto pNewContent = vpNewContents[i];
+				mapContents[pNewContent->mnID] = pNewContent;
+			}
+			ContentMap.Update(pKFi, mapContents);
+		}
+		
+		{
+			std::map<int, cv::Mat> mapDatas;
+			if (SLAM->TemporalDatas2.Count("content"))
+				mapDatas = SLAM->TemporalDatas2.Get("content");
+			for (int i = 0; i < vpNewContents.size(); i++)
+			{
+				auto pNewContent = vpNewContents[i];
+				cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
+				X.at<float>(0) = pNewContent->pos.at<float>(0);
+				X.at<float>(1) = -pNewContent->pos.at<float>(1);
+				X.at<float>(2) = pNewContent->pos.at<float>(2);
+				mapDatas[pNewContent->mnID] = X;
+			}
+			SLAM->TemporalDatas2.Update("content", mapDatas);
+		}
+		
 	}
 	int ContentProcessor::ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid) {
 				
