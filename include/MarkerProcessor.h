@@ -24,10 +24,10 @@ namespace SemanticSLAM {
 		static void DynamicObjectVisTest(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void CalculateInconsistency(EdgeSLAM::SLAM* SLAM, std::string user, int id, float len, float inc);
 		static void SaveInconsistency();
-
+		static void MarkerRegistration(EdgeSLAM::SLAM* SLAM, std::string keyword,std::string user, int id);
 		static void MarkerEventDetect(EdgeSLAM::SLAM* SLAM, std::string user, int id);
-		static void MarkerRegistration(EdgeSLAM::SLAM* SLAM, std::string user, int id, float len, float inc);
-
+		static void MarkerRegistrationAA(EdgeSLAM::SLAM* SLAM, std::string user, int id, float len, float inc);
+		static void MarkerCreation(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		//static std::vector<EdgeSLAM::KeyFrame*> MarkerGraphTraverse(int startID, int endID);
 	public:
 		//static ConcurrentMap<int, EdgeSLAM::KeyFrame*> MapMarkerKFs;

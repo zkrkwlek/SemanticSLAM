@@ -63,7 +63,6 @@ namespace SemanticSLAM {
 		auto pKF = pUser->mpRefKF;
 		if (!pKF)
 			return;
-
 		pUser->mnUsed++;
 
 		auto spLocalKFs = pUser->mSetLocalKeyFrames.Get();
