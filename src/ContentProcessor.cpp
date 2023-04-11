@@ -250,6 +250,7 @@ namespace SemanticSLAM {
 		if (!pUser)
 			return;
 		pUser->mnUsed++;
+		pUser->mnDebugAR++;
 		auto pKF = pUser->mpRefKF;
 		if (!pKF) {
 			pUser->mnUsed--;
@@ -267,7 +268,7 @@ namespace SemanticSLAM {
 		std::memcpy(fdata.data, res.data(), res.size());
 
 		ContentRegistration(SLAM, pKF, user, fdata, mid);
-
+		pUser->mnDebugAR--;
 		pUser->mnUsed--;
 	}
 	Content* ContentProcessor::GetContent(int id) {
@@ -301,16 +302,8 @@ namespace SemanticSLAM {
 		pNewContent->mnMarkerID = (int)data.at<float>(6);
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
 
-		/*int n = data.rows / 3;
-		std::vector<Content*> vpNewContents;
-		for (int i = 0; i < n; i++) {
-			cv::Mat X = data.rowRange(3 * i, 3 * i + 3);
-			auto pNewContent = new Content(X, user, mid);
-			pNewContent->attribute.at<float>(0, 0) = 2.0;
-			vpNewContents.push_back(pNewContent);
-			AllContentMap.Update(pNewContent->mnID, pNewContent);
-		}*/
-		
+		//std::cout << "draw = " << data.at<float>(7) << "," << data.at<float>(8) << std::endl;
+
 		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(100);
 		vpLocalKFs.push_back(pKF);
 		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
@@ -318,31 +311,20 @@ namespace SemanticSLAM {
 			std::map<int, Content*> mapContents;
 			if (ContentMap.Count(pKFi))
 				mapContents = ContentMap.Get(pKFi);
-			/*for (int i = 0; i < vpNewContents.size(); i++)
-			{
-				auto pNewContent = vpNewContents[i];
-				mapContents[pNewContent->mnID] = pNewContent;
-			}*/
 			mapContents[pNewContent->mnID] = pNewContent;
 			ContentMap.Update(pKFi, mapContents);
 		}
 		/*{
 			std::map<int, cv::Mat> mapDatas;
-			if (SLAM->TemporalDatas2.Count("content"))
-				mapDatas = SLAM->TemporalDatas2.Get("content");
-			for (int i = 0; i < vpNewContents.size(); i++)
-			{
-				auto pNewContent = vpNewContents[i];
-				cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
-				X.at<float>(0) = pNewContent->pos.at<float>(0);
-				X.at<float>(1) = -pNewContent->pos.at<float>(1);
-				X.at<float>(2) = pNewContent->pos.at<float>(2);
-				mapDatas[pNewContent->mnID] = X;
-			}
-			mapDatas[pNewContent->mnID] = X;
-			SLAM->TemporalDatas2.Update("content", mapDatas);
-		}
-		*/
+			if (SLAM->TemporalDatas2.Count("drawcontent"))
+				mapDatas = SLAM->TemporalDatas2.Get("drawcontent");
+			cv::Mat x = cv::Mat::zeros(2, 1, CV_32FC1);
+			x.at<float>(0) = data.at<float>(7);
+			x.at<float>(1) = data.at<float>(8);
+			mapDatas[pNewContent->mnID] = x;
+			SLAM->TemporalDatas2.Update("drawcontent", mapDatas);
+		}*/
+		
 	}
 	int ContentProcessor::ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid) {
 				
