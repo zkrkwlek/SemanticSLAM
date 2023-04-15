@@ -449,135 +449,7 @@ namespace SemanticSLAM {
 		}
 		pUser->mnUsed --;
 	}
-	void MarkerProcessor::DynamicObjectRegTest(EdgeSLAM::SLAM* SLAM, std::string user, int id, float len, float inc) {
-		auto pUser = SLAM->GetUser(user);
-		if (!pUser)
-			return;
-		pUser->mnUsed++;
-
-		cv::Mat K = pUser->GetCameraMatrix();
-		cv::Mat D = pUser->GetDistortionMatrix();
-
-		cv::Mat encoded = pUser->ImageDatas.Get(id);
-		cv::Mat img = cv::imdecode(encoded, cv::IMREAD_COLOR);
-		cv::Mat res;
-		img.copyTo(res);
-
-		std::vector<Marker*> vecMarkers;
-		//마커 인식 못하면 패스
-		ArucoMarker::MarkerDetection(img, K, D, vecMarkers, len, inc);
-		if (vecMarkers.size() == 0) {
-			pUser->mnUsed--;
-			return;
-		}
-		auto pMarker = vecMarkers[0];
-
-		//레퍼런스 키프레임을 못찾으면 패스
-		auto pKF = pUser->mpRefKF;
-		if (!pKF) {
-			pUser->mnUsed--;
-			return;
-		}
-		////로컬맵의 KF 얻기
-		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(20);
-		vpLocalKFs.push_back(pKF);
-		auto pMap = SLAM->GetMap(pUser->mapName);
-
-		//로컬맵의 평면 구성
-		cv::Mat T = pUser->PoseDatas.Get(id);
-		cv::Mat Rslam = T.rowRange(0, 3).colRange(0, 3);
-		cv::Mat tslam = T.rowRange(0, 3).col(3);
-		/*cv::Mat Tslam = cv::Mat::eye(4, 4, CV_32FC1);
-		Rslam.copyTo(Tslam.rowRange(0, 3).colRange(0, 3));
-		tslam.copyTo(Tslam.col(3).rowRange(0, 3));*/
-
-		cv::Mat Kinv = pUser->GetCameraInverseMatrix();
-		cv::Mat Tslaminv = cv::Mat::eye(4, 4, CV_32FC1); //pKF->GetPoseInverse();
-		cv::Mat Rinv = Rslam.t();
-		cv::Mat tinv = -Rinv*tslam;
-		Rinv.copyTo(Tslaminv.rowRange(0, 3).colRange(0, 3));
-		tinv.copyTo(Tslaminv.col(3).rowRange(0, 3));
-		cv::Mat Ow = tinv.clone();// pUser->GetPosition();
-
-
-		Plane* floor = nullptr;
-		Plane* ceil = nullptr;
-		std::set<Plane*> tempWallPlanes;
-		std::map<PlaneType, std::set<Plane*>> LocalMapPlanes;
-
-		for (std::vector<EdgeSLAM::KeyFrame*>::const_iterator itKF = vpLocalKFs.begin(), itEndKF = vpLocalKFs.end(); itKF != itEndKF; itKF++)
-		{
-			EdgeSLAM::KeyFrame* pKFi = *itKF;
-			if (PlaneEstimator::mPlaneConnections.Count(pKFi)) {
-				auto tempPlanes = PlaneEstimator::mPlaneConnections.Get(pKFi);
-				for (auto iter = tempPlanes.begin(), iend = tempPlanes.end(); iter != iend; iter++) {
-					auto plane = *iter;
-					LocalMapPlanes[plane->type].insert(plane);
-					if (plane->type == PlaneType::FLOOR) {
-						floor = plane;
-						break;
-					}
-				}
-			}
-			if (!floor)
-				break;
-		}
-		if (!floor) {
-			pUser->mnUsed--;
-			return;
-		}
-
-		if (pMarker->mnId > 97) {
-
-			if (!MapMarkerPos.Count(pMarker->mnId)) {
-				auto pt = pMarker->vecCorners[0];
-				cv::Mat Xw;
-				float depth;
-				cv::Point2f xy;
-				bool bX3D = Utils::CreateWorldPoint(pt, Kinv, Tslaminv, Ow, floor->param, Xw);
-				bool bProj = bX3D && Utils::ProjectPoint(xy, depth, Xw, K, Rslam, tslam);
-				//std::cout << xy << std::endl;
-				//cv::circle(res, xy, 5, cv::Scalar(0, 0, 255), -1);
-				//SLAM->VisualizeImage(res, 2);
-				MapMarkerPos.Update(pMarker->mnId, Xw);
-				nDetectedMarker++;
-
-				std::cout << "MARKER DETECTED = " <<pMarker->mnId<< std::endl << std::endl << std::endl << std::endl;
-				{
-					//api로 생성
-					cv::Mat data = cv::Mat::zeros(1000, 1, CV_32FC1);
-					data.at<float>(0) = pt.x;
-					data.at<float>(1) = pt.y;
-					data.at<float>(2) = Xw.at<float>(0);
-					data.at<float>(3) = Xw.at<float>(1);
-					data.at<float>(4) = Xw.at<float>(2);
-					data.at<float>(5) = 100.0; //일단 다이나믹 표시
-					data.at<float>(6) = (float)pMarker->mnId; // 마커 아이디 같이 넘기기
-
-					int cid = ContentProcessor::ContentRegistration(SLAM, pKF, user, data,0);
-					MapContents.Update(pMarker->mnId, ContentProcessor::GetContent(cid));
-					//std::stringstream ss;
-					//ss << "/Store?keyword=" << "ContentGeneration" << "&id=" << id << "&src=" << "MARKER" << "&ts=" << std::fixed << std::setprecision(6) << 0.0;
-					////std::chrono::high_resolution_clock::time_point s1 = std::chrono::high_resolution_clock::now();
-					//WebAPI api("143.248.6.143", 35005);
-					//api.Send(ss.str(), (const unsigned char*)data.data, sizeof(float) * 1000);
-				}
-			}
-			////경로 추가
-			if (MapContents.Count(pMarker->mnId) && MapContents.Count(pMarker->mnId - 1)) {
-				auto pContent = MapContents.Get(pMarker->mnId);
-				auto pNextContent = MapContents.Get(pMarker->mnId - 1);
-				auto ePos = pNextContent->pos;
-
-				pContent->attribute.at<float>(0, 0) = 1.0;
-				pContent->endPos = ePos.clone();
-				pContent->mnNextID = pNextContent->mnID;
-			}
-			
-		}
-		pUser->mnUsed--;
-	}
-
+	
 	void MarkerProcessor::MarkerCreation(EdgeSLAM::SLAM* SLAM, std::string user, int id){
 		//if (vecMarkers.size() > 0)
 		//{
@@ -804,7 +676,6 @@ namespace SemanticSLAM {
 		WebAPI API("143.248.6.143", 35005);
 		if (!MapMarkerPos.Count(mid)) {
 			//auto vpLocalKFs = pUser->mSetLocalKeyFrames.Get();
-
 			std::stringstream ss;
 			ss << "/Load?keyword=" << keyword << "&id=" << mid << "&src=" << user;
 			
@@ -815,6 +686,70 @@ namespace SemanticSLAM {
 			std::memcpy(fdata.data, res.data(), res.size());
 
 			MapMarkerPos.Update(mid, fdata);
+			////키프레임 연결하기.
+			//일단 연결하고 패스가 생성되면 패스 끝까지 갈 수 있도록 하기.
+			{
+				std::cout << "marker detected id = " << mid << std::endl;
+				auto spLocalKFs = pUser->mSetLocalKeyFrames.Get();
+				MapMarkerKFs.Update(mid, spLocalKFs);
+				/*{
+					std::map<int, cv::Mat> mapDatas;
+					if (SLAM->TemporalDatas2.Count("marker"))
+						mapDatas = SLAM->TemporalDatas2.Get("marker");
+					cv::Mat temp = fdata.rowRange(0, 3);
+					temp.at<float>(1) *= -1.0;
+					mapDatas[mid] = temp;
+					SLAM->TemporalDatas2.Update("marker", mapDatas);
+				}*/
+			}
+			////키프레임 연결하기.
+
+
+			//패스 생성하는 거
+			////패스 테스트
+			int prevID = mid - 1;
+			int nextID = mid + 1;
+			int pathid = -1;
+			int pathEndID = -1;
+			cv::Mat pathData = cv::Mat::zeros(0, 1, CV_32FC1);
+			bool bPath = false;
+			if (MapMarkerPos.Count(prevID)) {
+				pathid = prevID;
+				pathEndID = mid;
+				cv::Mat Xp = MapMarkerPos.Get(prevID).rowRange(0, 3);
+				pathData.push_back(Xp);
+				pathData.push_back(fdata.rowRange(0,3));
+				bPath = true;
+			}
+			if (MapMarkerPos.Count(nextID)) {
+				pathid = mid;
+				pathEndID = nextID;
+				cv::Mat Xn = MapMarkerPos.Get(nextID).rowRange(0, 3);
+				pathData.push_back(fdata.rowRange(0,3));
+				pathData.push_back(Xn);
+				bPath = true;
+			}
+			//시각화에 추가
+			if (bPath)
+			{
+				cv::Mat data = cv::Mat::zeros(3, 1, CV_32FC1);
+				data.at<float>(0) = 9;
+				data.at<float>(2) = 1;
+				data.push_back(pathData);
+				{
+					std::cout << "pathasdfasdfas asdfasfsd" << std::endl;
+					std::map<int, cv::Mat> mapDatas;
+					if (SLAM->TemporalDatas2.Count("path"))
+						mapDatas = SLAM->TemporalDatas2.Get("path");
+					cv::Mat temp = pathData.clone();
+					pathData.at<float>(1) *= -1.0;
+					pathData.at<float>(4) *= -1.0;
+					mapDatas[pathid] = pathData;
+					SLAM->TemporalDatas2.Update("path", mapDatas);
+				}
+				ContentProcessor::PathContentRegistration(SLAM, pathid, pathEndID, user, data, 0);
+			}
+			////패스 테스트
 		}
 		else {
 			cv::Mat Xw = MapMarkerPos.Get(mid);

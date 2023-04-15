@@ -22,7 +22,7 @@ namespace SemanticSLAM {
 		void Init(cv::Mat start, cv::Mat end) {
 			auto diffMat = end - start;
 			length = sqrt(diffMat.dot(diffMat));
-			speed = 0.1f;
+			speed = 0.2f;
 			s = start;
 			e = end;
 		}
@@ -58,10 +58,11 @@ namespace SemanticSLAM {
 		virtual~Content();
 	public:
 		int mnID, mnNextID, mnMarkerID;
-		cv::Mat pos;
+		cv::Mat data;
+		/*cv::Mat pos;
 		cv::Mat endPos;
 		cv::Mat dir;
-		cv::Mat attribute;
+		cv::Mat attribute;*/
 		bool mbMoving;
 		int mnContentModelID;
 		std::string src;
@@ -73,7 +74,7 @@ namespace SemanticSLAM {
 		static void TestTouch(std::string user, int id);
 		static void UpdateLatency(std::string keyword, std::string user, int id);
 		/////////
-		static void ResetContent();
+		static void ResetContent(EdgeSLAM::SLAM* SLAM);
 		static void ShareContent(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ContentProcess(EdgeSLAM::SLAM* system, std::string user, int id, std::string kewword, int mid);
 		static int ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid);

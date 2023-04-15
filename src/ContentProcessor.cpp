@@ -14,11 +14,14 @@ namespace SemanticSLAM {
 
 	//임시로 마커 아이디에 다른 타입이 들어감. 테스트 다시 해야 함. 드로우용 컨텐츠 생성하기 위해서
 	Content::Content(){}
-	Content::Content(cv::Mat _X, std::string _src, int _modelID):pos(_X), mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), endPos(cv::Mat::zeros(3,1,CV_32FC1)), attribute(cv::Mat::zeros(1,1,CV_32FC1)), mbMoving(false), mpPath(nullptr){}
+	Content::Content(cv::Mat _X, std::string _src, int _modelID):data(_X), mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), mbMoving(false), mpPath(nullptr){
+		data.at<float>(1) = (float)mnID;
+	}
 	Content::~Content(){
-		pos.release();
+		data.release();
+		/*pos.release();
 		dir.release();
-		endPos.release();
+		endPos.release();*/
 	}
 
 	////////////////실험용 코드
@@ -169,7 +172,9 @@ namespace SemanticSLAM {
 		data.at<float>(0) = spContents.size();
 		for (auto iter = spContents.begin(), iend = spContents.end(); iter != iend; iter++) {
 			auto pContent = *iter;
-			cv::Mat id = cv::Mat::zeros(1, 1, CV_32FC1);
+			data.push_back(pContent->data);
+			
+			/*cv::Mat id = cv::Mat::zeros(1, 1, CV_32FC1);
 			id.at<float>(0) = (float)pContent->mnID;
 			cv::Mat nid = cv::Mat::zeros(1, 1, CV_32FC1);
 			nid.at<float>(0) = (float)pContent->mnMarkerID;
@@ -177,7 +182,7 @@ namespace SemanticSLAM {
 			data.push_back(nid);
 			data.push_back(pContent->attribute);
 			data.push_back(pContent->pos);
-			data.push_back(pContent->endPos);
+			data.push_back(pContent->endPos);*/
 			//방향 추가해야 함.
 		}
 		if (data.rows < 500) {
@@ -264,7 +269,7 @@ namespace SemanticSLAM {
 		auto res = mpAPI->Send(ss.str(), "");
 		int n2 = res.size();
 
-		cv::Mat fdata = cv::Mat::zeros(1000, 1, CV_32FC1);
+		cv::Mat fdata = cv::Mat::zeros(n2/4, 1, CV_32FC1);
 		std::memcpy(fdata.data, res.data(), res.size());
 
 		ContentRegistration(SLAM, pKF, user, fdata, mid);
@@ -276,19 +281,45 @@ namespace SemanticSLAM {
 			return AllContentMap.Get(id);
 		return nullptr;
 	}
-	void ContentProcessor::ResetContent() {
+	void ContentProcessor::ResetContent(EdgeSLAM::SLAM* SLAM) {
 		AllContentMap.Clear();
 		ContentMap.Clear();
 		MarkerContentMap.Clear();
 		MapArucoMarkerPos.Clear();
 		AnchorIDs.Clear();
+		{
+			std::map<int, cv::Mat> mapDatas;
+			if (SLAM->TemporalDatas2.Count("path")) {
+				mapDatas = SLAM->TemporalDatas2.Get("path");
+				mapDatas.clear();
+				SLAM->TemporalDatas2.Update("path", mapDatas);
+
+			}
+		}
+		{
+			std::map<int, cv::Mat> mapDatas;
+			if (SLAM->TemporalDatas2.Count("pathpos")) {
+				mapDatas = SLAM->TemporalDatas2.Get("pathpos");
+				mapDatas.clear();
+				SLAM->TemporalDatas2.Update("pathpos", mapDatas);
+			}
+		}
+		{
+			std::map<int, cv::Mat> mapDatas;
+			if (SLAM->TemporalDatas2.Count("content")) {
+				mapDatas = SLAM->TemporalDatas2.Get("content");
+				mapDatas.clear();
+				SLAM->TemporalDatas2.Update("content", mapDatas);
+			}
+		}
 
 		MarkerProcessor::MapMarkerKFs.Clear();
 		MarkerProcessor::MapMarkerPos.Clear();
 	}
 	void ContentProcessor::DrawContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid) {
 
-		cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
+		auto pNewContent = new Content(data, user, mid);
+		/*cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
 		X.at<float>(0) = data.at<float>(0);
 		X.at<float>(1) = data.at<float>(1);
 		X.at<float>(2) = data.at<float>(2);
@@ -299,7 +330,7 @@ namespace SemanticSLAM {
 		auto pNewContent = new Content(X, user, mid);
 		pNewContent->attribute.at<float>(0, 0) = 2.0;
 		pNewContent->endPos = X2;
-		pNewContent->mnMarkerID = (int)data.at<float>(6);
+		pNewContent->mnMarkerID = (int)data.at<float>(6);*/
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
 
 		//std::cout << "draw = " << data.at<float>(7) << "," << data.at<float>(8) << std::endl;
@@ -327,13 +358,10 @@ namespace SemanticSLAM {
 		
 	}
 	int ContentProcessor::ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid) {
-				
-		cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
-		X.at<float>(0) = data.at<float>(2);
-		X.at<float>(1) = data.at<float>(3);
-		X.at<float>(2) = data.at<float>(4);
-		auto pNewContent = new Content(X, user, mid);
-
+		
+		auto pNewContent = new Content(data, user, mid);
+		std::cout <<"Add = " << data.t() << std::endl;
+		std::cout << "End = " << pNewContent->data.t() << std::endl;
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
 
 		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(100);
@@ -347,7 +375,7 @@ namespace SemanticSLAM {
 			ContentMap.Update(pKFi, mapContents);
 		}
 
-		{
+		/*{
 			std::map<int, cv::Mat> mapDatas;
 			if (SLAM->TemporalDatas2.Count("content"))
 				mapDatas = SLAM->TemporalDatas2.Get("content");
@@ -357,7 +385,7 @@ namespace SemanticSLAM {
 			X.at<float>(2) = data.at<float>(4);
 			mapDatas[pNewContent->mnID] = X;
 			SLAM->TemporalDatas2.Update("content", mapDatas);
-		}
+		}*/
 
 		//std::cout << "temp content" << data.at<float>(0) << " " << data.at<float>(1) << " " << data.at<float>(5) << " " << data.at<float>(7) << " || " << data.at<float>(6) << " " << data.at<float>(8) << std::endl;
 		//std::cout << "temp content POS = " << data.at<float>(2) << " " << data.at<float>(3) << " " << data.at<float>(4) << " " << data.at<float>(5) << " " << data.at<float>(6) << std::endl;
@@ -387,21 +415,11 @@ namespace SemanticSLAM {
 	int ContentProcessor::PathContentRegistration(EdgeSLAM::SLAM* SLAM, int sid, int eid, std::string user, cv::Mat data, int mid) {
 
 		auto pUser = SLAM->GetUser(user);
-		/*if (!pUser)
-			return;
-		pUser->mnUsed++;
-		auto pKF = pUser->mpRefKF;
-		if (!pKF) {
-			pUser->mnUsed--;
-			return;
-		}*/
-
-		cv::Mat X = data.rowRange(0, 3).clone();
-		auto pNewContent = new Content(X, user, mid);
-
-		pNewContent->attribute.at<float>(0, 0) = 1.0;
+		auto pNewContent = new Content(data, user, mid);
+		//cv::Mat X = data.rowRange(0, 3).clone();
+		/*pNewContent->attribute.at<float>(0, 0) = 1.0;
 		pNewContent->endPos = data.rowRange(3,6).clone();
-		pNewContent->mpPath = new Path();
+		pNewContent->mpPath = new Path();*/
 
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
 		//두 지점 사이의 키프레임을 추가하도록 하기
@@ -478,14 +496,14 @@ namespace SemanticSLAM {
 
 		std::map<int, cv::Mat> mapDatas;
 		if (path) {
-			path->Init(C->pos, C->endPos);
-			path->MoveStart();
-			while (path->bMove) {
-				auto pos = path->Move();
-				//객체 등록
-				mapDatas[id] = pos;
-				SLAM->TemporalDatas2.Update("MovingObject", mapDatas);
-			}
+			//path->Init(C->pos, C->endPos);
+			//path->MoveStart();
+			//while (path->bMove) {
+			//	auto pos = path->Move();
+			//	//객체 등록
+			//	mapDatas[id] = pos;
+			//	SLAM->TemporalDatas2.Update("MovingObject", mapDatas);
+			//}
 		}
 		mapDatas.clear();
 		SLAM->TemporalDatas2.Update("MovingObject", mapDatas);
@@ -523,15 +541,17 @@ namespace SemanticSLAM {
 			auto res = mpAPI->Send(ss.str(), "");
 			int n2 = res.size();
 
-			cv::Mat fdata = cv::Mat::zeros(1000, 1, CV_32FC1);
+			cv::Mat fdata = cv::Mat::zeros(n2 / 4, 1, CV_32FC1);
 			std::memcpy(fdata.data, res.data(), res.size());
-
+			pContent->data = fdata.clone();
+			std::cout << "Update = " << pContent->data.t() << std::endl;
+			/*cv::Mat fdata = cv::Mat::zeros(1000, 1, CV_32FC1);
+			std::memcpy(fdata.data, res.data(), res.size());
 			cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
 			X.at<float>(0) = fdata.at<float>(2);
 			X.at<float>(1) = fdata.at<float>(3);
 			X.at<float>(2) = fdata.at<float>(4);
-
-			pContent->pos = X.clone();
+			pContent->pos = X.clone();*/
 			//가상 객체 그래프 변경도 되어야 함.
 
 		}
