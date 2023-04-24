@@ -14,7 +14,9 @@ namespace SemanticSLAM {
 
 	//임시로 마커 아이디에 다른 타입이 들어감. 테스트 다시 해야 함. 드로우용 컨텐츠 생성하기 위해서
 	Content::Content(){}
-	Content::Content(cv::Mat _X, std::string _src, int _modelID):data(_X), mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), mbMoving(false), mpPath(nullptr){
+	Content::Content(const cv::Mat& _X, std::string _src, int _modelID):mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), mbMoving(false), mpPath(nullptr){
+		float len = _X.at<float>(0);
+		data = _X.rowRange(0, len).clone();
 		data.at<float>(1) = (float)mnID;
 	}
 	Content::~Content(){
@@ -156,8 +158,6 @@ namespace SemanticSLAM {
 					auto pContent = jter->second;
 					if (!spContents.count(pContent))
 						spContents.insert(pContent);
-
-					//nContent++;
 				}
 			}
 		}
@@ -173,7 +173,6 @@ namespace SemanticSLAM {
 		for (auto iter = spContents.begin(), iend = spContents.end(); iter != iend; iter++) {
 			auto pContent = *iter;
 			data.push_back(pContent->data);
-			
 			/*cv::Mat id = cv::Mat::zeros(1, 1, CV_32FC1);
 			id.at<float>(0) = (float)pContent->mnID;
 			cv::Mat nid = cv::Mat::zeros(1, 1, CV_32FC1);
@@ -185,6 +184,7 @@ namespace SemanticSLAM {
 			data.push_back(pContent->endPos);*/
 			//방향 추가해야 함.
 		}
+		
 		if (data.rows < 500) {
 			cv::Mat temp = cv::Mat::zeros(1000 - data.rows, 1, CV_32FC1);
 			data.push_back(temp);
@@ -268,9 +268,9 @@ namespace SemanticSLAM {
 		WebAPI* mpAPI = new WebAPI("143.248.6.143", 35005);
 		auto res = mpAPI->Send(ss.str(), "");
 		int n2 = res.size();
-
-		cv::Mat fdata = cv::Mat::zeros(n2/4, 1, CV_32FC1);
-		std::memcpy(fdata.data, res.data(), res.size());
+		cv::Mat fdata = cv::Mat(n2 / 4, 1, CV_32FC1, (void*)res.data());
+		/*cv::Mat fdata = cv::Mat::zeros(n2/4, 1, CV_32FC1);
+		std::memcpy(fdata.data, res.data(), res.size());*/
 
 		ContentRegistration(SLAM, pKF, user, fdata, mid);
 		pUser->mnDebugAR--;
@@ -357,11 +357,10 @@ namespace SemanticSLAM {
 		}*/
 		
 	}
-	int ContentProcessor::ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid) {
+	int ContentProcessor::ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, const cv::Mat& data, int mid) {
 		
 		auto pNewContent = new Content(data, user, mid);
-		std::cout <<"Add = " << data.t() << std::endl;
-		std::cout << "End = " << pNewContent->data.t() << std::endl;
+		//std::cout <<"Add = " << data.t() << std::endl;
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
 
 		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(100);
@@ -540,11 +539,11 @@ namespace SemanticSLAM {
 			WebAPI* mpAPI = new WebAPI("143.248.6.143", 35005);
 			auto res = mpAPI->Send(ss.str(), "");
 			int n2 = res.size();
-
-			cv::Mat fdata = cv::Mat::zeros(n2 / 4, 1, CV_32FC1);
-			std::memcpy(fdata.data, res.data(), res.size());
-			pContent->data = fdata.clone();
-			std::cout << "Update = " << pContent->data.t() << std::endl;
+			cv::Mat fdata = cv::Mat(n2 / 4, 1, CV_32FC1, (void*)res.data());
+			/*cv::Mat fdata = cv::Mat::zeros(n2 / 4, 1, CV_32FC1);
+			std::memcpy(fdata.data, res.data(), res.size());*/
+			float len = fdata.at<float>(0);
+			pContent->data = fdata.rowRange(0, len).clone();
 			/*cv::Mat fdata = cv::Mat::zeros(1000, 1, CV_32FC1);
 			std::memcpy(fdata.data, res.data(), res.size());
 			cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
