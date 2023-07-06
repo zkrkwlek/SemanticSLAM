@@ -33,7 +33,7 @@ CoordinateIntegration
 
 		//	IMGs.Update(id, img);
 
-		SLAM->VisualizeImage(img, 0);
+		//SLAM->VisualizeImage(img, 0);
 
 		cv::Mat data = cv::Mat::ones(1000, 1, CV_32FC1);
 		{
@@ -108,7 +108,7 @@ CoordinateIntegration
 			//std::cout <<proj.col(i).t()<<" "<< proj.at <float>(0, i) / d<<" "<< proj.at <float>(1, i) <<" "<< pUser->mpCamera->mnHeight<< std::endl;
 			cv::circle(img, pt, 3, cv::Scalar(255, 0, 255), -1);
 		}
-		SLAM->VisualizeImage(img, 2);
+		//SLAM->VisualizeImage(img, 2);
 		pUser->mnUsed--;
 	}
 	void CoordinateIntegration::DownloadImage(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
@@ -246,7 +246,7 @@ CoordinateIntegration
 		
 		//////////////////////////
 		////////////////////////
-		SLAM->VisualizeImage(img, 2);
+		//SLAM->VisualizeImage(img, 2);
 		//////////////////////////////
 
 

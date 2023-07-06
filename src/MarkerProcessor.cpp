@@ -211,8 +211,8 @@ namespace SemanticSLAM {
 				//	}//if find marker
 				//}//for traverse marker
 				////마커 성능 측
-				if(pUser->GetVisID()==0)
-					SLAM->VisualizeImage(img, 3);
+				/*if(pUser->GetVisID()==0)
+					SLAM->VisualizeImage(img, 3);*/
 			}
 			else
 				std::cout << "not found pose data" << std::endl;
@@ -332,7 +332,7 @@ namespace SemanticSLAM {
 
 			cv::circle(img, pt, 3, cv::Scalar(255, 0, 0), -1);
 			cv::circle(img, xy, 3, cv::Scalar(0, 0, 255), -1);
-			SLAM->VisualizeImage(img, 2);
+			//SLAM->VisualizeImage(img, 2);
 		}
 		pUser->mnUsed--;
 	}
@@ -434,7 +434,7 @@ namespace SemanticSLAM {
 			Utils::ProjectPoint(xy3, depth, Xt, K, Rslam, tslam);
 			cv::line(img, xy1, xy2, cv::Scalar(255, 0, 0), 2);
 			cv::circle(img, xy3, 5, cv::Scalar(0, 0, 255), -1);
-			SLAM->VisualizeImage(img, 2);
+			//SLAM->VisualizeImage(img, 2);
 
 			////다음 경로로 변경
 			if (t_test1 > totalTime) {
@@ -820,7 +820,7 @@ namespace SemanticSLAM {
 		//마커 정보 전송
 
 		if(pUser->GetVisID()==0)
-			SLAM->VisualizeImage(res, 2);
+			SLAM->VisualizeImage(pUser->mapName, res, 2);
 
 		pUser->mnUsed--;
 		return;

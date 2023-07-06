@@ -8,7 +8,16 @@
 #include <ConcurrentMap.h>
 
 namespace SemanticSLAM {
+	class ObjectLabel {
+	public:
+		ObjectLabel();
+		virtual ~ObjectLabel();
 
+	public:
+		ConcurrentMap<int, int> LabelCount;
+	private:
+
+	};
 	class SemanticLabel {
 	public:
 		SemanticLabel();

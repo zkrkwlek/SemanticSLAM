@@ -1,7 +1,11 @@
 #include <SemanticLabel.h>
 
 namespace SemanticSLAM {
-	SemanticLabel::SemanticLabel(){}
+	ObjectLabel::ObjectLabel(){}
+	ObjectLabel::~ObjectLabel() {
+		LabelCount.Release();
+	}
+	SemanticLabel::SemanticLabel() {}
 	SemanticLabel::~SemanticLabel() {
 		LabelCount.Release();
 	}

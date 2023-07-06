@@ -2,6 +2,7 @@
 #include <Utils.h>
 #include <User.h>
 #include "MarkerProcessor.h"
+#include "SemanticProcessor.h"
 
 namespace SemanticSLAM {
 	std::atomic<int> ContentProcessor::nContentID = 0;
@@ -14,7 +15,9 @@ namespace SemanticSLAM {
 
 	//임시로 마커 아이디에 다른 타입이 들어감. 테스트 다시 해야 함. 드로우용 컨텐츠 생성하기 위해서
 	Content::Content(){}
-	Content::Content(const cv::Mat& _X, std::string _src, int _modelID):mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), mbMoving(false), mpPath(nullptr){
+	Content::Content(const cv::Mat& _X, std::string _src, int _modelID, long long ts):mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), mbMoving(false), mpPath(nullptr)
+	,mnLastUpdatedTime(ts)
+	{
 		float len = _X.at<float>(0);
 		data = _X.rowRange(0, len).clone();
 		data.at<float>(1) = (float)mnID;
@@ -318,7 +321,10 @@ namespace SemanticSLAM {
 	}
 	void ContentProcessor::DrawContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid) {
 
-		auto pNewContent = new Content(data, user, mid);
+		std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+		long long ts = start.time_since_epoch().count();
+
+		auto pNewContent = new Content(data, user, mid, ts);
 		/*cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
 		X.at<float>(0) = data.at<float>(0);
 		X.at<float>(1) = data.at<float>(1);
@@ -359,10 +365,13 @@ namespace SemanticSLAM {
 	}
 	int ContentProcessor::ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, const cv::Mat& data, int mid) {
 		
-		auto pNewContent = new Content(data, user, mid);
+		std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+		long long ts = start.time_since_epoch().count();
+
+		auto pNewContent = new Content(data, user, mid, ts);
 		//std::cout <<"Add = " << data.t() << std::endl;
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
-
+		
 		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(100);
 		vpLocalKFs.push_back(pKF);
 		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
@@ -374,17 +383,18 @@ namespace SemanticSLAM {
 			ContentMap.Update(pKFi, mapContents);
 		}
 
-		/*{
+		{
 			std::map<int, cv::Mat> mapDatas;
 			if (SLAM->TemporalDatas2.Count("content"))
 				mapDatas = SLAM->TemporalDatas2.Get("content");
 			cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
-			X.at<float>(0) = data.at<float>(2);
-			X.at<float>(1) = -data.at<float>(3);
-			X.at<float>(2) = data.at<float>(4);
+			X.at<float>(0) = data.at<float>(3);
+			X.at<float>(1) = -data.at<float>(4);
+			X.at<float>(2) = data.at<float>(5);
 			mapDatas[pNewContent->mnID] = X;
+			//std::cout << "add = " << X.t() << std::endl;
 			SLAM->TemporalDatas2.Update("content", mapDatas);
-		}*/
+		}
 
 		//std::cout << "temp content" << data.at<float>(0) << " " << data.at<float>(1) << " " << data.at<float>(5) << " " << data.at<float>(7) << " || " << data.at<float>(6) << " " << data.at<float>(8) << std::endl;
 		//std::cout << "temp content POS = " << data.at<float>(2) << " " << data.at<float>(3) << " " << data.at<float>(4) << " " << data.at<float>(5) << " " << data.at<float>(6) << std::endl;
@@ -393,7 +403,10 @@ namespace SemanticSLAM {
 
 	int ContentProcessor::MarkerContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int id) {
 		
-		auto pNewContent = new Content(data, user,id);
+		std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+		long long ts = start.time_since_epoch().count();
+
+		auto pNewContent = new Content(data, user,id, ts);
 		MarkerContentMap.Update(pNewContent->mnID, pNewContent);
 		//pNewContent->mnMarkerID = id;
 		MapArucoMarkerPos.Update(id, data);
@@ -413,8 +426,11 @@ namespace SemanticSLAM {
 	}
 	int ContentProcessor::PathContentRegistration(EdgeSLAM::SLAM* SLAM, int sid, int eid, std::string user, cv::Mat data, int mid) {
 
+		std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+		long long ts = start.time_since_epoch().count();
+
 		auto pUser = SLAM->GetUser(user);
-		auto pNewContent = new Content(data, user, mid);
+		auto pNewContent = new Content(data, user, mid, ts);
 		//cv::Mat X = data.rowRange(0, 3).clone();
 		/*pNewContent->attribute.at<float>(0, 0) = 1.0;
 		pNewContent->endPos = data.rowRange(3,6).clone();
@@ -530,6 +546,9 @@ namespace SemanticSLAM {
 
 	void ContentProcessor::UpdateProcess(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		
+		std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+		long long ts = start.time_since_epoch().count();
+
 		if (AllContentMap.Count(id)) {
 			
 			auto pContent = AllContentMap.Get(id);
@@ -544,6 +563,22 @@ namespace SemanticSLAM {
 			std::memcpy(fdata.data, res.data(), res.size());*/
 			float len = fdata.at<float>(0);
 			pContent->data = fdata.rowRange(0, len).clone();
+
+			{
+				std::map<int, cv::Mat> mapDatas;
+				if (SLAM->TemporalDatas2.Count("content"))
+					mapDatas = SLAM->TemporalDatas2.Get("content");
+				cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
+				X.at<float>(0) = fdata.at<float>(3);
+				X.at<float>(1) = -fdata.at<float>(4);
+				X.at<float>(2) = fdata.at<float>(5);
+				mapDatas[pContent->mnID] = X;
+				SLAM->TemporalDatas2.Update("content", mapDatas);
+				//std::cout << "upadte = " <<pContent->mnID<<" " << X.t() << std::endl;
+			}
+
+			pContent->mnLastUpdatedTime = ts;
+
 			/*cv::Mat fdata = cv::Mat::zeros(1000, 1, CV_32FC1);
 			std::memcpy(fdata.data, res.data(), res.size());
 			cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);

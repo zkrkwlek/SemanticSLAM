@@ -54,10 +54,11 @@ namespace SemanticSLAM {
 	class Content {
 	public:
 		Content();
-		Content(const cv::Mat& _X, std::string _src, int _modelID);
+		Content(const cv::Mat& _X, std::string _src, int _modelID, long long ts);
 		virtual~Content();
 	public:
 		int mnID, mnNextID, mnMarkerID;
+		std::atomic<long long> mnLastUpdatedTime; // 처음 생성시 마지막으로 갱신시
 		cv::Mat data;
 		/*cv::Mat pos;
 		cv::Mat endPos;
