@@ -37,6 +37,7 @@ namespace SemanticSLAM {
 		/// <summary>
 		/// 다이나믹 오브젝트 슬램
 		/// </summary>
+		static void ObjectPreprocessing(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ObjectMapping(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ObjectTracking(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 
