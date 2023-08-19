@@ -12,6 +12,9 @@ namespace EdgeSLAM {
 	class ObjectNode;
 	class ObjectBoundingBox;
 	class KeyFrame;
+	class ObjectMapPoint;
+	class Map;
+	class SLAM;
 }
 
 namespace SemanticSLAM {
@@ -37,11 +40,16 @@ namespace SemanticSLAM {
 		/// <summary>
 		/// 다이나믹 오브젝트 슬램
 		/// </summary>
+		static void CheckDynamicObject(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ObjectPreprocessing(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ObjectMapping(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ObjectTracking(EdgeSLAM::SLAM* SLAM, std::string user, int id);
+		static void ObjectMapGeneration(EdgeSLAM::SLAM* SLAM, std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs, std::set<EdgeSLAM::ObjectBoundingBox*> spNewBBs, std::set<EdgeSLAM::ObjectBoundingBox*> setNeighObjectBBs, EdgeSLAM::Map* MAP);
+		static void CreateObjectMapPoint(EdgeSLAM::KeyFrame* pKF1, EdgeSLAM::KeyFrame* pKF2, EdgeSLAM::ObjectBoundingBox* pBB1, EdgeSLAM::ObjectBoundingBox* pBB2, float minThresh, float maxThresh, EdgeSLAM::Map* pMap, EdgeSLAM::ObjectNode* pObjMap);
+		static void MapPointCulling(EdgeSLAM::ObjectNode* map, unsigned long int nCurrentKFid);
+		static void CreateBoundingBox(EdgeSLAM::SLAM* SLAM, std::string user, int id, EdgeSLAM::KeyFrame* pTargetKF, cv::Mat labeled);
 
-		static void Init();
+		static void Init(EdgeSLAM::SLAM* _SLAM);
 		static void DenseOpticalFlow(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void MultiViewStereo(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ObjectUpdate(EdgeSLAM::SLAM* SLAM, std::string user, int id);
@@ -66,10 +74,11 @@ namespace SemanticSLAM {
 
 		//디텍션에서 바운딩박스 기록
 		static ConcurrentMap<EdgeSLAM::KeyFrame*, std::set<EdgeSLAM::ObjectBoundingBox*>> GraphKeyFrameObjectBB;
+		static ConcurrentMap<int, std::set<EdgeSLAM::ObjectBoundingBox*>> GraphFrameObjectBB;
 	private:
 		static std::string strLabel, strYoloObjectLabel;
+		static EdgeSLAM::SLAM* SLAM;
 	};
 }
-
 
 #endif

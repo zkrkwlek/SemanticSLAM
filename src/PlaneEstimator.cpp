@@ -152,6 +152,11 @@ namespace SemanticSLAM {
 		std::cout << "Estimatino!!!!" << std::endl << std::endl << std::endl;
 	}*/
 
+	float Plane::Distacne(cv::Mat X) {
+		float a = this->param.at<float>(3);
+		return ((float)this->normal.dot(X))+a;
+	}
+
 	void PlaneEstimator::UpdateLocalMapPlanes (EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		//std::cout << "UpdateLocalMapPlanes start" << std::endl;
 		auto pUser = SLAM->GetUser(user);
