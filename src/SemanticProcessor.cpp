@@ -19,6 +19,8 @@
 #include <Optimizer.h>
 #include <SLAM.h>
 
+#include <DynamicTrackingProcessor.h>
+
 namespace SemanticSLAM {
 	SemanticProcessor::SemanticProcessor() {}
 	SemanticProcessor::~SemanticProcessor() {}
@@ -28,6 +30,8 @@ namespace SemanticSLAM {
 	
 	EdgeSLAM::SLAM* SemanticProcessor::SLAM;
 	EdgeSLAM::FeatureTracker* ObjectSearchPoints::Matcher;
+
+	//ConcurrentSet<int> ObjectWhiteList, LabelWhiteList;
 
 	ConcurrentMap<int, std::vector<cv::Point2f>> SemanticProcessor::SuperPoints;
 	ConcurrentMap<int, cv::Mat> SemanticProcessor::SemanticLabelImage;
@@ -48,6 +52,9 @@ namespace SemanticSLAM {
 	ConcurrentMap<EdgeSLAM::KeyFrame*, std::set<EdgeSLAM::ObjectNode*>> SemanticProcessor::GraphKeyFrameObject;
 	ConcurrentMap<EdgeSLAM::KeyFrame*, std::set<EdgeSLAM::ObjectBoundingBox*>> SemanticProcessor::GraphKeyFrameObjectBB;
 	ConcurrentMap<int, std::set<EdgeSLAM::ObjectBoundingBox*>> SemanticProcessor::GraphFrameObjectBB;
+
+	ConcurrentMap<int, int> SemanticProcessor::GlobalObjectCount;
+	ConcurrentMap<int, int> SemanticProcessor::GlobalLabelCount;
 
 	void SemanticProcessor::Init(EdgeSLAM::SLAM* _SLAM) {
 		cv::Mat colormap = cv::Mat::zeros(256, 3, CV_8UC1);
@@ -73,10 +80,17 @@ namespace SemanticSLAM {
 			SemanticColors.push_back(color);
 		}
 
+		ObjectWhiteList.Update((int)MovingObjectLabel::CHAIR);
+		//ObjectWhiteList.Update((int)MovingObjectLabel::PERSON);
+		ObjectCandidateList.Update((int)MovingObjectLabel::SUITCASE, (int)MovingObjectLabel::CHAIR);
+		ObjectCandidateList.Update((int)MovingObjectLabel::HANDBAG, (int)MovingObjectLabel::CHAIR);
+		LabelWhiteList.Update((int)StructureLabel::CHAIR);
+
 		vecStrSemanticLabels = Utils::Split(strLabel, ",");
 		vecStrObjectLabels = Utils::Split(strYoloObjectLabel, ",");
 		SLAM = _SLAM;
 		ObjectSearchPoints::Matcher = SLAM->mpFeatureTracker;
+		DynamicTrackingProcessor::Init();
 	}
 
 	void SemanticProcessor::SendLocalMap(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
@@ -250,9 +264,14 @@ namespace SemanticSLAM {
 		}
 		spNewBBs = GraphKeyFrameObjectBB.Get(pTargetKF);
 		std::set<int> testLabelID;
-		std::map<int, int> LabelCountTest;
-
+		std::map<int, int> LabelCountTest = GlobalLabelCount.Get();
+		std::map < EdgeSLAM::ObjectBoundingBox*, std::set<int>> LabelCountTest2;
 		
+		for (auto oter = spNewBBs.begin(), oend = spNewBBs.end(); oter != oend; oter++) {
+			auto pBBox = *oter;
+			LabelCountTest2[pBBox] = std::set<int>();
+		}
+
 		for (int k = 0, kend = pTargetKF->N; k < kend; k++) {
 			
 			auto pt = pTargetKF->mvKeys[k].pt;
@@ -261,18 +280,22 @@ namespace SemanticSLAM {
 				continue;
 			if (label == (int)StructureLabel::WALL)
 				continue;
-			if (label == (int)StructureLabel::CEIL)
+			if (label == (int)StructureLabel::CEIL) 
 				continue;
+			if (label == (int)StructureLabel::BUILDING)
+				continue;
+			LabelCountTest[label]++;
 
 			for (auto oter = spNewBBs.begin(), oend = spNewBBs.end(); oter != oend; oter++) {
 				auto pBBox = *oter;
 
 				if (!pBBox->rect.contains(pt))
 					continue;
-
-				LabelCountTest[label]++;
-				if (label != 20)
-					continue;
+				
+				if (!LabelCountTest2[pBBox].count(label))	
+					LabelCountTest2[pBBox].insert(label);
+				/*if (label != 20)
+					continue;*/
 
 				auto pMP = pTargetKF->GetMapPoint(k);
 				if (pMP && !pMP->isBad()) {
@@ -280,8 +303,10 @@ namespace SemanticSLAM {
 				}
 				else
 					pBBox->mvpMapPoints.push_back(nullptr); 
+				
 				cv::Mat row = pTargetKF->mDescriptors.row(k);
 				pBBox->mvIDXs.push_back(k);
+				pBBox->mapIDXs[k] = pBBox->mvKeys.size();
 				pBBox->mvKeys.push_back(pTargetKF->mvKeysUn[k]);
 				pBBox->mvbOutliers.push_back(false);
 				pBBox->mvpObjectPoints.push_back(nullptr);
@@ -289,6 +314,26 @@ namespace SemanticSLAM {
 			}
 			
 		}
+
+		//label test
+		/*for (auto iter = LabelCountTest2.begin(), iend = LabelCountTest2.end(); iter != iend; iter++) {
+			auto pBBox = iter->first;
+			auto setLabels = iter->second;
+			std::string objName = vecStrObjectLabels[pBBox->label - 1];
+			int objCount = GlobalObjectCount.Get(pBBox->label);
+			std::cout << "BBOX = " << objName <<", id = "<<pBBox->id << "== label = " << pBBox->label << " " << objCount << std::endl;
+			for (auto lter = setLabels.begin(), lend = setLabels.end(); lter != lend; lter++) {
+				auto label = *lter;
+				auto count = LabelCountTest[label];
+				std::cout << "Label Count = " <<objName<<" = "<< vecStrSemanticLabels[label - 1] << " " << label <<" "<<count << std::endl;
+			}
+		}
+		for (auto iter = LabelCountTest.begin(), iend = LabelCountTest.end(); iter != iend; iter++) {
+			auto label = iter->first;
+			auto count = iter->second;
+			GlobalLabelCount.Update(label, count);
+		}*/
+		//label test
 
 		//일정 이하의 키포인트가 있는 박스는 삭제
 		std::map<EdgeSLAM::ObjectBoundingBox*, bool> TempBBs;
@@ -305,6 +350,8 @@ namespace SemanticSLAM {
 			auto pBox = oter->first;
 			if (b)
 				spNewBBs.erase(pBox);
+			else
+				pBox->ComputeBow(SLAM->mpDBoWVoc);
 			//else {
 			//	//이미지 얻고
 			//	//포즈로 테스트
@@ -612,7 +659,7 @@ namespace SemanticSLAM {
 		for (int y = 0; y < h; y++) {
 			for (int x = 0; x < w; x++) {
 				int label = labeled.at<uchar>(y, x) + 1;
-				if(label == 20 || label == 70)
+				if(label == (int)StructureLabel::CHAIR || label ==(int)StructureLabel::EARTH || label == (int)StructureLabel::TABLE)
 					segcolor2.at<cv::Vec3b>(y, x) = SemanticColors[label];
 			}
 		}
@@ -1132,7 +1179,7 @@ namespace SemanticSLAM {
 					auto pKF2 = pTempBox->mpKF;
 					if (pKF1 && pKF2) {
 						EdgeSLAM::ObjectNode* pObjNode = nullptr;
-						CreateObjectMapPoint(pKF1, pKF2, pBBox, pTempBox, thMinDesc, thMaxDesc, pMap, pObjNode);
+						//CreateObjectMapPoint(pKF1, pKF2, pBBox, pTempBox, thMinDesc, thMaxDesc, pMap, pObjNode);
 					}
 				}
 				else {
@@ -1173,7 +1220,7 @@ namespace SemanticSLAM {
 		//SLAM->VisualizeImage(pUser->mapName, img, 3);
 		
 	}
-	void SemanticProcessor::ObjectTracking(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
+	void SemanticProcessor::ObjectTracking(EdgeSLAM::SLAM* SLAM, std::string user, int id, const cv::Mat& img) {
 		
 		auto pUser = SLAM->GetUser(user);
 		if (!pUser)
@@ -1216,13 +1263,7 @@ namespace SemanticSLAM {
 		}
 		std::cout << "ttt = 1" << std::endl;*/
 
-		WebAPI* mpAPI = new WebAPI("143.248.6.143", 35005);
-		std::stringstream ss;
-		ss << "/Load?keyword=Image" << "&id=" << id << "&src=" << user;
-		auto res = mpAPI->Send(ss.str(), "");
-		int n2 = res.size();
-		cv::Mat temp = cv::Mat(n2, 1, CV_8UC1, (void*)res.data());
-		cv::Mat img = cv::imdecode(temp, cv::IMREAD_COLOR);
+		
 
 		std::set<EdgeSLAM::ObjectBoundingBox*> spNewBBs;
 		if (!GraphFrameObjectBB.Count(id)) {
@@ -1255,15 +1296,19 @@ namespace SemanticSLAM {
 		}
 		//if (setNeighObjectBBs.size() == 0)
 		//	return;
-
+		pUser->mnUsed++;
 		cv::Mat P;
 		if (!pUser->PoseDatas.Count(id)) {
+			std::cout << "Not estimated camera pose with Image " << id << std::endl;
+			pUser->mnUsed--;
 			return;
 		}
 		P = pUser->PoseDatas.Get(id);
-
-		pUser->mnUsed++;
-		pUser->mnDebugSeg++;
+		if (P.empty()) {
+			std::cout << "Localization Failed = " << id << std::endl;
+			pUser->mnUsed--;
+			return;
+		}
 
 		cv::Mat Rcw = P.rowRange(0, 3).colRange(0, 3);
 		cv::Mat tcw = P.rowRange(0, 3).col(3);
@@ -1272,9 +1317,9 @@ namespace SemanticSLAM {
 		cv::Mat twc = -Rwc * tcw;
 
 		auto mapName = pUser->mapName;
-
 		pUser->mnUsed--;
 		pUser->mnDebugSeg--;
+		pUser->mnDebugLabel--;
 		//bbox 얻기
 
 		//평면
@@ -1308,50 +1353,249 @@ namespace SemanticSLAM {
 
 		cv::Mat k = cam->K;
 		cv::Mat d = cam->D;
-		//k.convertTo(k, CV_64FC1);
+		cv::Mat Kdouble;
+		k.convertTo(Kdouble, CV_64FC1);
 		//d.convertTo(d, CV_64FC1);
-		std::cout << "Object Tracking start " << setNeighObjectBBs.size()<< std::endl;
+		
+		if (spObjNodes.size() == 0){
+			//리로컬 때만
+			std::cout << "without Object" << std::endl;
+			return;
+		}
+
+		auto mapObjectCount = GlobalObjectCount.Get();
+		//std::cout << "Object Tracking start " << " = " << setNeighObjectBBs.size() << " " << spNewBBs.size() << std::endl;
 		for (auto nter = spNewBBs.begin(), nend = spNewBBs.end(); nter != nend; nter++) {
 			auto pNewBox = *nter;
-
-			if (pNewBox->label != (int)MovingObjectLabel::CHAIR)
-				continue;
+			cv::Point2f pt(pNewBox->rect.x+pNewBox->rect.width/2, pNewBox->rect.y + 20);
 			
+			//cv::putText(img, vecStrObjectLabels[pNewBox->label-1], pt, 2, 1.2, cv::Scalar(255, 255, 255));
+			if (pNewBox->label != (int)MovingObjectLabel::CHAIR && pNewBox->label != (int)MovingObjectLabel::PERSON){
+				std::cout << "Not chair =" << vecStrObjectLabels[pNewBox->label-1] <<" = "<<pNewBox->label <<","<< mapObjectCount[pNewBox->label]<< std::endl;
+				cv::rectangle(img, pNewBox->rect, cv::Scalar(255, 255, 0), 2);
+				continue;
+			}
+			std::chrono::high_resolution_clock::time_point astart = std::chrono::high_resolution_clock::now();
+			
+			
+			
+			/*for (auto iter = setNeighObjectBBs.begin(), iend = setNeighObjectBBs.end(); iter != iend; iter++) {
+				auto pNeighBox = *iter;
+				DynamicTrackingProcessor::MatchTest(pNewBox, pNeighBox, img.clone(),cv::Mat(),k);
+			}*/
+			cv::Mat P = cv::Mat::eye(4,4,CV_32FC1);
+			//DynamicTrackingProcessor::PoseRelocalization(pNewBox, setNeighObjectBBs, img, Kdouble, P);
+			//int nRes = DynamicTrackingProcessor::MatchTest(pNewBox, setNeighObjectBBs, img, Kdouble, P);
+			auto pObject = *spObjNodes.begin();
+
+			///tracking test
+			pUser->mnUsed++;
+			if (pUser->mapObjectTrackingResult.Count(pObject->mnId)) {
+				auto pTrackRes = pUser->mapObjectTrackingResult.Get(pObject->mnId);
+				if (pTrackRes->mState == EdgeSLAM::ObjectTrackingState::Success && pTrackRes->mpLastFrame) {
+					DynamicTrackingProcessor::ObjectTracking(SLAM, mapName, pNewBox, pObject, pTrackRes, img, Kdouble, P);
+				}
+			}
+			pUser->mnUsed--;
+			///
+
+			int nRes = DynamicTrackingProcessor::ObjectRelocalization(pNewBox, pObject, img, Kdouble, P);
+			//DynamicTrackingProcessor::MatchTestByFrame(pNewBox->mpF, setNeighObjectBBs, img, Kdouble, P);
+			
+			//int nMatch = ObjectDynamicTracking(SLAM, user, id, pNewBox, setNeighObjectBBs, P, Kdouble, d);
+			std::chrono::high_resolution_clock::time_point aend = std::chrono::high_resolution_clock::now();
+			auto du_a2 = std::chrono::duration_cast<std::chrono::milliseconds>(aend - astart).count();
+			float t_test1 = du_a2 / 1000.0;
+			std::cout << "Dynamic Tracking Processing time= " << " " << t_test1 <<" "<< nRes <<" "<< spObjNodes .size()<<"==" << pObject->mnId << std::endl;
+			
+			int oid = pObject->mnId;
+			pUser->mnUsed++;
+			EdgeSLAM::ObjectTrackingResult* pTracking = nullptr;
+			if (pUser->mapObjectTrackingResult.Count(oid)) {
+				pTracking = pUser->mapObjectTrackingResult.Get(oid);
+			}
+			else {
+				pTracking = new EdgeSLAM::ObjectTrackingResult(oid, pObject->mnLabel, user);
+				pUser->mapObjectTrackingResult.Update(oid, pTracking);
+			}
+			if (pTracking->mState == EdgeSLAM::ObjectTrackingState::Success) {
+				//tracking test
+				std::cout << "Object Tracking test = " << std::endl;
+			}
+			pUser->mnUsed--;
+			EdgeSLAM::ObjectTrackingState state = EdgeSLAM::ObjectTrackingState::Failed;
+			if (nRes > 10 ) {
+				state = EdgeSLAM::ObjectTrackingState::Success;
+				pTracking->mnLastSuccessFrameId = id;
+				pTracking->Pose = P.clone();
+
+				EdgeSLAM::ObjectTrackingFrame* pTrackFrame = new EdgeSLAM::ObjectTrackingFrame();
+				for (int i = 0; i < pNewBox->N; i++) {
+					auto pMPi = pNewBox->mvpMapPoints.get(i);
+					if (!pMPi || pMPi->isBad())
+						continue;
+					auto pt = pNewBox->mvKeys[i].pt;
+					pTrackFrame->frame = img.clone();
+					pTrackFrame->mvImagePoints.push_back(pt);
+					pTrackFrame->mvpMapPoints.push_back(pMPi);
+				}
+				if (pTracking->mpLastFrame)
+					delete pTracking->mpLastFrame;
+				pTracking->mpLastFrame = pTrackFrame;
+			}
+			pTracking->mState = state;
+			pTracking->mnLastSuccessFrameId = id;
+
+			//visualization
+			{
+				float Na = 0;
+				cv::Mat avgPos = cv::Mat::zeros(3, 1, CV_32FC1);
+				cv::Mat R2 = P.rowRange(0, 3).colRange(0, 3);
+				cv::Mat t2 = P.rowRange(0, 3).col(3);
+				for (int i = 0; i < pNewBox->N; i++) {
+
+					auto pMPi = pNewBox->mvpMapPoints.get(i);
+					if (!pMPi || pMPi->isBad())
+						continue;
+
+					cv::Mat Xw = pMPi->GetWorldPos();
+					cv::Mat proj = k * (R2 * Xw + t2);
+					float depth = proj.at<float>(2);
+					cv::Point2f objPt(proj.at<float>(0) / depth, proj.at<float>(1) / depth);
+
+					auto imgPt = pNewBox->mvKeys[i].pt;
+					cv::circle(img, imgPt, 2, cv::Scalar(0, 0, 255), -1);
+					cv::circle(img, objPt, 2, cv::Scalar(255, 0, 0), -1);
+
+					/*proj = k * (R * Xw + t);
+					depth = proj.at<float>(2);
+					cv::Point2f objPt2 = cv::Point2f(proj.at<float>(0) / depth, proj.at<float>(1) / depth);
+					cv::circle(img, objPt2, 3, cv::Scalar(0, 255, 0), -1);*/
+
+					cv::line(img, imgPt, objPt, cv::Scalar(255, 255, 0), 5);
+					avgPos += Xw;
+					Na++;
+				}
+				auto pFrame = pNewBox->mpF;
+				for (int i = 0; i < pFrame->N; i++) {
+					auto pMPi = pFrame->mvpMapPoints[i];
+					if (!pMPi || pMPi->isBad())
+						continue;
+					auto imgPt = pFrame->mvKeysUn[i].pt;
+					cv::circle(img, imgPt, 2, cv::Scalar(0, 0, 255), -1);
+				}
+				{
+					cv::Mat origin = cv::Mat::zeros(3, 1, CV_32FC1);
+					//avgPos /= Na;
+					cv::Mat OBJc = t2;
+					cv::Mat proj = k * OBJc;
+					float depth = proj.at<float>(2);
+					cv::Point2f pt(proj.at<float>(0) / depth, proj.at<float>(1) / depth);
+					cv::circle(img, pt, 80, cv::Scalar(255, 255, 0), 3);
+
+					//world에서 표현
+					cv::Mat OBJw = Rwc * OBJc + twc;
+					std::map<int, cv::Mat> a;
+					a[0] = OBJw;
+					SLAM->TemporalDatas2.Update("dynamic", a);
+				}
+			}
+
+			//std::cout << "relocal test = " << nMatch << std::endl;
+			continue;
 			int max_match = 0;
 			EdgeSLAM::ObjectBoundingBox* pMaxBox = nullptr;
-			std::chrono::high_resolution_clock::time_point astart = std::chrono::high_resolution_clock::now();
 			std::vector<std::pair<int, int>> vMaxMatchedIndices;
+			std::set<EdgeSLAM::MapPoint*> setMapFounds;
 			int nTotal = 0;
+			float Na = 0;
+			cv::Mat avgPos = cv::Mat::zeros(3, 1, CV_32FC1);
+			cv::Mat P2 = cv::Mat::eye(4, 4, CV_32FC1);
 			for (auto iter = setNeighObjectBBs.begin(), iend = setNeighObjectBBs.end(); iter != iend; iter++) {
 				auto pNeighBox = *iter;
-				std::vector<std::pair<int, int>> vMatchedIndices;
-				int nMatch = ObjectSearchPoints::SearchObjectBoxAndBoxForTracking(pNeighBox, pNewBox, vMatchedIndices, thMaxDesc, 0.9);
 				
-				for (int i = 0, iend = vMatchedIndices.size(); i < iend; i++) {
-					int idx1 = vMatchedIndices[i].first;
-					int idx2 = vMatchedIndices[i].second;
-					auto pMPi = pNeighBox->mvpMapPoints.get(idx1);
+				std::vector<EdgeSLAM::MapPoint*> vpMapPointMatches;
+				int nMatch = ObjectSearchPoints::SearchBoxByBoW(pNeighBox, pNewBox, vpMapPointMatches, 50, 0.8);
+				
+				std::vector<cv::Point2f> imagePoints;
+				std::vector<cv::Point3f> objectPoints;
+				for (int i = 0, iend = vpMapPointMatches.size(); i < iend; i++) {
+					auto pMPi = vpMapPointMatches[i];
 					if (!pMPi || pMPi->isBad())
 						continue;
 					if (Floor) {
 						float dist = Floor->Distacne(pMPi->GetWorldPos());
-						if (abs(dist) < 0.05)
+						if (abs(dist) < 0.1)
 							continue;
 					}
-					//cv::circle(img, pNewBox->mvKeys[idx2].pt, 3, cv::Scalar(255, 0, 0), -1);
-					pNewBox->mvpMapPoints.update(idx2, pMPi);
+					if (setMapFounds.count(pMPi)) {
+						continue;
+					}
+					cv::Point2f pt = pNewBox->mvKeys[i].pt;
+					cv::Mat Xo = pMPi->GetWorldPos();
+					cv::Point3f pt2(Xo.at<float>(0), Xo.at<float>(1), Xo.at<float>(2));
+					imagePoints.push_back(pt);
+					objectPoints.push_back(pt2);
+					pNewBox->mvpMapPoints.update(i, pMPi);
+					setMapFounds.insert(pMPi);
 					nTotal++;
-					//Na++;
-					//avgPos += pMPi->GetWorldPos();
 				}
 				
+				cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);
+				cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64FC1);
+				cv::Mat R = cv::Mat::eye(3, 3, CV_32FC1);
+				cv::Mat t = cv::Mat::zeros(3, 1, CV_32FC1);
+				/*bool bPnP = cv::solvePnPRansac(objectPoints, imagePoints, k, d, rvec, tvec);
+				cv::Rodrigues(rvec, R);
+				R.convertTo(R, CV_32FC1);
+				tvec.convertTo(t, CV_32FC1);*/
+
+				/*for (int i = 0, iend = imagePoints.size(); i < iend; i++) {
+					cv::Mat Xw(objectPoints[i], CV_32FC1);
+					cv::Mat proj = k*(R * Xw + t);
+					float depth = proj.at<float>(2);
+					cv::Point2f pt(proj.at<float>(0) / depth, proj.at<float>(1) / depth);
+					cv::line(img, pt, imagePoints[i], cv::Scalar(255, 255, 0), 1);
+					cv::circle(img, pt, 5,cv::Scalar(0,0,255), -1);
+					cv::circle(img, imagePoints[i], 5,cv::Scalar(255, 0, 0), -1);
+				}*/
+
+				
+				R.copyTo(P.rowRange(0, 3).colRange(0, 3));
+				t.copyTo(P.col(3).rowRange(0, 3));
+				//ObjectPoseInitialization
+				int nOpt = ObjectOptimizer::ObjectPoseOptimization(pNewBox, P);
+				
+				for (int i = 0; i < pNewBox->N; i++) {
+
+					auto pMPi = pNewBox->mvpMapPoints.get(i);
+					if (!pMPi || pMPi->isBad())
+						continue;
+					if (pNewBox->mvbOutliers[i])
+					{
+						pNewBox->mvpMapPoints.update(i, nullptr);
+						pNewBox->mvbOutliers[i] = false;
+						if (pMPi && setMapFounds.count(pMPi)) {
+							setMapFounds.erase(pMPi);
+						}
+						nTotal--;
+					}
+				}
+
+				if (nOpt > 10)
+					break;
+				//std::cout << "Optimization test = " << nOpt << std::endl;
 				if (max_match < nMatch){
 					max_match = nMatch;
 					pMaxBox = pNeighBox;
-					vMaxMatchedIndices = vMatchedIndices;
+					//vMaxMatchedIndices = vMatchedIndices;
 				}
 			}
-			if (nTotal > 20) {
+			
+			std::cout << "Tracking = " << pNewBox->N << " " << nTotal <<" "<<max_match << std::endl;
+			continue;
+
+			if (nTotal > 10) {
 				float Na = 0;
 				cv::Mat avgPos = cv::Mat::zeros(3, 1, CV_32FC1);
 				auto vecMPs = pNewBox->mvpMapPoints.get();
@@ -1359,8 +1603,96 @@ namespace SemanticSLAM {
 					auto pMP = vecMPs[i];
 					if (!pMP || pMP->isBad())
 						continue;
+					avgPos += pMP->GetWorldPos();
+					Na++;
 					cv::circle(img, pNewBox->mvKeys[i].pt, 3, cv::Scalar(255, 0, 0), -1);
 				}
+				avgPos /= Na;
+
+				//solve pnp test
+				std::vector<cv::Point2f> imagePoints;
+				std::vector<cv::Point3f> objectPoints;
+
+				std::map<int, cv::Mat> dynamicOBJs;
+
+				for (int i = 0, iend = pNewBox->N; i < iend; i++) {
+					//std::cout << "0" << std::endl;
+					auto pMP = vecMPs[i];
+					auto pt = pNewBox->mvKeys[i].pt;
+
+					if (!pMP || pMP->isBad())
+						continue;
+					cv::Mat Xo = pMP->GetWorldPos();
+					cv::Point3f pt2(Xo.at<float>(0), Xo.at<float>(1), Xo.at<float>(2));
+					//std::cout << Xo.t() <<" "<<pt<<" "<<k<<" "<<d<< std::endl;
+					imagePoints.push_back(pt);
+					objectPoints.push_back(pt2);
+					dynamicOBJs[i] = Xo;
+				}
+				{
+					cv::Mat P = cv::Mat::eye(4, 4, CV_32FC1);
+					int nOpt = ObjectOptimizer::ObjectPoseOptimization(pNewBox, P);
+				}
+				cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);
+				cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64FC1);
+				bool bPnP = cv::solvePnPRansac(objectPoints, imagePoints, k, d, rvec, tvec);
+				//cv::solvePnPRefineLM(objectPoints, imagePoints, k, d, rvec, tvec);
+				if (bPnP) {
+					//cv::Mat R, t;
+					//cv::Rodrigues(rvec, R);
+					//R.convertTo(R, CV_32FC1);
+					//tvec.convertTo(t, CV_32FC1);
+					//cv::Mat P = cv::Mat::eye(4, 4, CV_32FC1);
+					//R.copyTo(P.rowRange(0, 3).colRange(0, 3));
+					//t.copyTo(P.col(3).rowRange(0, 3));
+					//int nOpt = ObjectOptimizer::ObjectPoseOptimization(pNewBox, P);
+					//if (nOpt > 10) {
+
+					//	cv::Mat Rco = P.rowRange(0, 3).colRange(0, 3);
+					//	cv::Mat tco = P.rowRange(0, 3).col(3);
+					//	cv::Mat temp = Rco * avgPos + tco;
+					//	temp = k * temp;
+					//	float depth = temp.at<float>(2);
+					//	cv::Point2f pt(temp.at<float>(0) / depth, temp.at<float>(1) / depth);
+					//	cv::circle(img, pt, 50, cv::Scalar(255, 0, 255), 3);
+					//	//SLAM->VisualizeImage(mapName, img, 3);
+					//}
+					{
+						cv::Mat Rco, tco;
+						cv::Rodrigues(rvec, Rco);
+						Rco.convertTo(Rco, CV_32FC1);
+						tvec.convertTo(tco, CV_32FC1);
+						cv::Mat OBJc = Rco * avgPos + tco;
+						cv::Mat proj = k * OBJc;
+						float depth = proj.at<float>(2);
+						cv::Point2f pt(proj.at<float>(0) / depth, proj.at<float>(1) / depth);
+						cv::circle(img, pt, 80, cv::Scalar(255, 255, 0), 3);
+
+						//world에서 표현
+						cv::Mat OBJw = Rwc* OBJc + twc;
+						std::map<int, cv::Mat> a;
+						a[0] = OBJw;
+						SLAM->TemporalDatas2.Update("dynamic", a);
+						SLAM->TemporalDatas2.Update("dynamic2", dynamicOBJs);
+					}
+				}
+				else
+					std::cout << "Fail Object Initial Pose Estimation" << std::endl;
+				//std::cout <<"PNP = "<<bPnP<< rvec << " " << tvec << " " << rvec.type() << std::endl;
+				/*std::vector<cv::Point2f> projectedPoints;
+
+				cv::projectPoints(objectPoints, rvec, tvec, k, d, projectedPoints);
+				std::cout << "22222" << std::endl;
+				for (int i = 0; i < projectedPoints.size(); i++) {
+					auto pt = projectedPoints[i];
+					auto pt2 = imagePoints[i];
+					std::cout << pt << " " << pt2 << std::endl;
+					cv::circle(img, pt, 5, cv::Scalar(255,0,255), -1);
+				}*/
+
+				continue;
+
+				//tracking test
 				cv::Mat Pose;
 				int nOpt = ObjectOptimizer::ObjectPoseOptimization(pNewBox, Pose);
 				if (nOpt > 10) {
@@ -1375,6 +1707,8 @@ namespace SemanticSLAM {
 					//SLAM->VisualizeImage(mapName, img, 3);
 				}
 			}
+			else
+				std::cout << "Not enough matching points" << std::endl;
 			//if (max_match > 10) {
 			//	float Na = 0;
 			//	cv::Mat avgPos = cv::Mat::zeros(3, 1, CV_32FC1);
@@ -1413,9 +1747,7 @@ namespace SemanticSLAM {
 			//	}
 			//}
 			
-			std::chrono::high_resolution_clock::time_point aend = std::chrono::high_resolution_clock::now();
-			auto du_a2 = std::chrono::duration_cast<std::chrono::milliseconds>(aend - astart).count();
-			float t_test1 = du_a2 / 1000.0;
+			
 			//std::cout << "processing time = " << t_test1 << " " << max_match << std::endl;
 
 			//for (auto iter = spObjNodes.begin(), iend = spObjNodes.end(); iter != iend; iter++) {
@@ -1578,6 +1910,8 @@ namespace SemanticSLAM {
 		
 	}
 
+	
+
 	//추후에는 오브젝트 디텍션만 하는 용도로. 여기의 코드가 객체 갱신으로 옮기기
 	void SemanticProcessor::ObjectDetection(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		auto pUser = SLAM->GetUser(user);
@@ -1598,6 +1932,7 @@ namespace SemanticSLAM {
 
 		std::set<EdgeSLAM::ObjectBoundingBox*> spBBoxes;
 
+		auto mapObjectCount = GlobalObjectCount.Get();
 		if (bMapping) {
 			//매핑용
 			auto pKF = pUser->KeyFrames.Get(id);
@@ -1606,16 +1941,28 @@ namespace SemanticSLAM {
 			}
 			
 			for (int j = 0; j < n; j++) {
-				int label = (int)data.at<float>(j, 0);
+				int label = (int)data.at<float>(j, 0)+1;
+				bool bC1 = ObjectWhiteList.Count(label);
+				bool bC2 = ObjectCandidateList.Count(label);
+				
+				if (!bC1 && !bC2)
+					continue;
+				if(!bC1 && bC2){
+					label = ObjectCandidateList.Get(label);
+				}
 				float conf = data.at<float>(j, 1);
 
 				cv::Point2f left(data.at<float>(j, 2), data.at<float>(j, 3));
 				cv::Point2f right(data.at<float>(j, 4), data.at<float>(j, 5));
 
 				//사람이 0이기 때문에 +1을 함.
-				auto pBBox = new EdgeSLAM::ObjectBoundingBox(pKF, label + 1, conf, left, right);
+				auto pBBox = new EdgeSLAM::ObjectBoundingBox(pKF, label, conf, left, right);
 				spBBoxes.insert(pBBox);
+				mapObjectCount[pBBox->label]++;
+
 			}
+
+			//merge
 
 			if (n > 0) {
 				GraphKeyFrameObjectBB.Update(pKF, spBBoxes);
@@ -1623,54 +1970,86 @@ namespace SemanticSLAM {
 		}
 		else {
 			//트래킹용
-			cv::Mat encoded = pUser->ImageDatas.Get(id);
-			cv::Mat img = cv::imdecode(encoded, cv::IMREAD_COLOR);
-			
+			cv::Mat img = cv::Mat();
+			/*if (pUser->ImageDatas.Count(id)) {
+				cv::Mat encoded = pUser->ImageDatas.Get(id);
+				img = cv::imdecode(encoded, cv::IMREAD_COLOR);
+			}*/
 			if (img.empty())
 			{
-				std::cout << "return wo image" << std::endl;
-				return;
+				//std::cout << "return wo image" << std::endl;
+				//return;
+
+				WebAPI* mpAPI = new WebAPI("143.248.6.143", 35005);
+				std::stringstream ss;
+				ss << "/Load?keyword=Image" << "&id=" << id << "&src=" << user;
+				auto res = mpAPI->Send(ss.str(), "");
+				int n2 = res.size();
+				cv::Mat temp = cv::Mat(n2, 1, CV_8UC1, (void*)res.data());
+				img = cv::imdecode(temp, cv::IMREAD_COLOR);
 			}
 			
 			auto cam = pUser->mpCamera;
-			EdgeSLAM::Frame frame(img, cam, id);
-
+			EdgeSLAM::Frame* frame = new EdgeSLAM::Frame(img, cam, id);
+			frame->reset_map_points();
 			for (int j = 0; j < n; j++) {
-				int label = (int)data.at<float>(j, 0);
+				int label = (int)data.at<float>(j, 0)+1;
+
+				bool bC1 = ObjectWhiteList.Count(label);
+				bool bC2 = ObjectCandidateList.Count(label);
+
+				if (!bC1 && !bC2)
+					continue;
+				if (!bC1 && bC2) {
+					label = ObjectCandidateList.Get(label);
+				}
+
 				float conf = data.at<float>(j, 1);
 
 				cv::Point2f left(data.at<float>(j, 2), data.at<float>(j, 3));
 				cv::Point2f right(data.at<float>(j, 4), data.at<float>(j, 5));
 
 				//사람이 0이기 때문에 +1을 함.
-				auto pBBox = new EdgeSLAM::ObjectBoundingBox(&frame, label + 1, conf, left, right);
+				auto pBBox = new EdgeSLAM::ObjectBoundingBox(frame, label, conf, left, right);
 				spBBoxes.insert(pBBox);
+				mapObjectCount[pBBox->label]++;
 			}
 			
 			for (auto oter = spBBoxes.begin(), oend = spBBoxes.end(); oter != oend; oter++) {
 				auto pBBox = *oter;
-				for (int k = 0, kend = frame.N; k < kend; k++) {
-					auto pt = frame.mvKeys[k].pt;
+				for (int k = 0, kend = frame->N; k < kend; k++) {
+					auto pt = frame->mvKeys[k].pt;
 					if (!pBBox->rect.contains(pt))
 						continue;
 					
-					cv::Mat row = frame.mDescriptors.row(k);
+					cv::Mat row = frame->mDescriptors.row(k);
 					pBBox->mvIDXs.push_back(k);
-					pBBox->mvKeys.push_back(frame.mvKeysUn[k]);
+					pBBox->mapIDXs[k] = pBBox->mvKeys.size();
+					pBBox->mvKeys.push_back(frame->mvKeysUn[k]);
 					pBBox->mvbOutliers.push_back(false);
 					pBBox->mvpObjectPoints.push_back(nullptr);
 					pBBox->mvpMapPoints.push_back(nullptr);
 					pBBox->desc.push_back(row.clone());
 				}
 				pBBox->N = pBBox->desc.rows;
+				pBBox->ComputeBow(SLAM->mpDBoWVoc);
 			}
-			
 			if (n > 0) {
 				GraphFrameObjectBB.Update(id, spBBoxes);
-				SLAM->pool->EnqueueJob(SemanticProcessor::ObjectTracking, SLAM, user, id);
+				ObjectTracking(SLAM, user, id, img);
+				//SLAM->pool->EnqueueJob(SemanticProcessor::ObjectTracking, SLAM, user, id, img);
 			}
 		}
-		
+		///object detection count test
+		for (auto iter = mapObjectCount.begin(), iend = mapObjectCount.end(); iter != iend; iter++) {
+			auto label = iter->first;
+			auto count = iter->second;
+			/*if (count > 10)
+			{
+				std::cout << "object = " << vecStrObjectLabels[label - 1] << " " << label << " " << count << std::endl;
+			}*/
+			GlobalObjectCount.Update(label, count);
+		}
 		////바운딩 박스 & 마스킹
 		return;
 	}
@@ -1734,9 +2113,11 @@ namespace SemanticSLAM {
 
 		if (setNeighObjectBBs.size() == 0)
 			return;
-
+		pUser->mnUsed++;
+		int w = pUser->mpCamera->mnWidth;
+		int h = pUser->mpCamera->mnHeight;
 		auto pMap = pUser->mpMap;
-		
+		pUser->mnUsed--;
 		if (spNodes.size() > 0) {
 			//spNodes = GraphKeyFrameObject.Get(pKF);
 			//객체와 오브젝트 매칭
@@ -1748,46 +2129,99 @@ namespace SemanticSLAM {
 			auto thMaxDesc = SLAM->mpFeatureTracker->max_descriptor_distance;
 			auto thMinDesc = SLAM->mpFeatureTracker->min_descriptor_distance;
 
-			for (auto nter = spNewBBs.begin(), nend = spNewBBs.end(); nter != nend; nter++) {
-				auto pNewBox = *nter;
-				if (pNewBox->mvKeys.size() < 20)
-					continue;
-				for (auto iter = spNodes.begin(), iend = spNodes.end(); iter != iend; iter++) {
-					auto pObjNode = *iter;
-					std::vector<std::pair<int, int>> vMatchedIndices;
-					
-					//매칭과 최적화가 필요함.
+			////추가 매핑
+			//for (auto nter = spNewBBs.begin(), nend = spNewBBs.end(); nter != nend; nter++) {
+			//	auto pNewBox = *nter;
+			//	if (pNewBox->mvKeys.size() < 20)
+			//		continue;
+			//	auto pKF1 = pNewBox->mpKF;
+			//	
+			//	for (auto iter = setNeighObjectBBs.begin(), iend = setNeighObjectBBs.end(); iter != iend; iter++) {
+			//		auto pNeighBox = *iter;
 
-					int nMatch = ObjectSearchPoints::SearchObjectNodeAndBox(pObjNode, pNewBox, vMatchedIndices, thMaxDesc, thMaxDesc, 0.85, false);
+			//		////F매칭 테스트
+			//		//std::vector<std::pair<int, int>> vMatchedIndices;
+			//		//int nMatch = ObjectSearchPoints::SearchObjectBoxAndBoxForTracking(pNeighBox, pNewBox, vMatchedIndices, thMaxDesc, 0.9);
+			//		//std::vector<cv::Point2f> pts1, pts2;
+			//		//std::vector<uchar> inliers;
+			//		//cv::Mat R, t, TempMap;
+			//		//for (int i = 0, iend = vMatchedIndices.size(); i < iend; i++) {
+			//		//	int idx1 = vMatchedIndices[i].first;
+			//		//	int idx2 = vMatchedIndices[i].second;
 
-					auto mvpMPs = pObjNode->mspMPs.ConvertVector();
-					//auto spObjBBs = pObjNode->mspBBs.Get();
-					int nTemp = 0;
-					for (int i = 0, iend = vMatchedIndices.size(); i < iend; i++) {
-						int idx1 = vMatchedIndices[i].first;
-						int idx2 = vMatchedIndices[i].second;
-						auto pMP = mvpMPs[idx1];
-						if (!pMP || pMP->isBad())
-							continue;
-						pNewBox->mvpObjectPoints.update(idx2, pMP);
-						pMP->AddObservation(pNewBox, idx2);
-						pMP->ComputeDistinctiveDescriptors();
-					}
-					pNewBox->UpdateConnections();
+			//		//	auto pt1 = pNeighBox->mvKeys[idx1].pt;
+			//		//	auto pt2 = pNeighBox->mvKeys[idx1].pt;
 
-					std::cout << "Matching test = " << mvpMPs.size() << " || " <<pNewBox->mvKeys.size()<<" "<<pNewBox->GetBestCovisibilityBoxes(20).size() << " || " << nMatch << " || " << nTemp << std::endl;
-				}
-			}
+			//		//	pts1.push_back(pt1);
+			//		//	pts2.push_back(pt2);
+
+			//		//}
+			//		//int nF = Utils::RecoverPose(pts1, pts2, inliers, pNewBox->K, R, t, TempMap);
+			//		//std::cout << "F matching test111 = " << nF <<" "<<nMatch << std::endl;
+
+			//		//삼각화 테스트
+			//		//auto pNeighBox = *iter;
+			//		auto pKF2 = pNeighBox->mpKF;
+			//		if (pKF1 && pKF2 && (pKF1->mnId != pKF2->mnId)) {
+			//			cv::Mat K = pKF1->K.clone();
+			//			cv::Mat R1 = pKF1->GetRotation();
+			//			cv::Mat t1 = pKF1->GetTranslation();
+			//			cv::Mat R2 = pKF2->GetRotation();
+			//			cv::Mat t2 = pKF2->GetTranslation();
+			//			cv::Mat F12 = Utils::ComputeF12(R1, t1, R2, t2, K, K);
+			//			std::vector<std::pair<int, int>> vMatchedIndices;
+			//			int nMatch = ObjectSearchPoints::SearchObjectBoxAndBoxForTriangulation(pNeighBox, pNewBox, vMatchedIndices, F12, thMaxDesc, thMinDesc, 0.8, false);
+			//			std::cout << "F matching test222 = " << nMatch << " " << pNewBox->N << " " << pNeighBox->N << std::endl;
+			//		}
+			//		
+			//	}
+			//	break;
+			//	for (auto iter = spNodes.begin(), iend = spNodes.end(); iter != iend; iter++) {
+			//		auto pObjNode = *iter;
+			//		std::vector<std::pair<int, int>> vMatchedIndices;
+			//		
+			//		//매칭과 최적화가 필요함.
+
+			//		int nMatch = ObjectSearchPoints::SearchObjectNodeAndBox(pObjNode, pNewBox, vMatchedIndices, thMaxDesc, thMaxDesc, 0.85, false);
+
+			//		auto mvpMPs = pObjNode->mspMPs.ConvertVector();
+			//		//auto spObjBBs = pObjNode->mspBBs.Get();
+			//		int nTemp = 0;
+			//		for (int i = 0, iend = vMatchedIndices.size(); i < iend; i++) {
+			//			int idx1 = vMatchedIndices[i].first;
+			//			int idx2 = vMatchedIndices[i].second;
+			//			auto pMP = mvpMPs[idx1];
+			//			if (!pMP || pMP->isBad())
+			//				continue;
+			//			pNewBox->mvpObjectPoints.update(idx2, pMP);
+			//			pMP->AddObservation(pNewBox, idx2);
+			//			pMP->ComputeDistinctiveDescriptors();
+			//		}
+			//		pNewBox->UpdateConnections();
+
+			//		std::cout << "Matching test = " << mvpMPs.size() << " || " <<pNewBox->mvKeys.size()<<" "<<pNewBox->GetBestCovisibilityBoxes(20).size() << " || " << nMatch << " || " << nTemp << std::endl;
+			//	}
+			//}
+			////추가 매핑
+			
+
+			////bow matching test
+			cv::Mat matched_img = cv::Mat::zeros(2*h, w, CV_8UC3);
+			cv::Rect upper(0, 0, w, h);
+			cv::Rect lower(0, h,w,h);
+			
 			//오브젝트 맵포인트 컬링
 			for (auto iter = spNodes.begin(), iend = spNodes.end(); iter != iend; iter++) {
 				auto pObjNode = *iter;
 				MapPointCulling(pObjNode, pKF->mnId);
 			}
 			//여기서 맵 포인트 다시 만들기
+			//매칭 테스트
 			for (auto nter = spNewBBs.begin(), nend = spNewBBs.end(); nter != nend; nter++) {
 				auto pNewBox = *nter;
 				if (pNewBox->mvKeys.size() < 20)
 					continue;
+
 				for (auto iter = spNodes.begin(), iend = spNodes.end(); iter != iend; iter++) {
 					auto pObjNode = *iter;
 					auto spObjBBs = pObjNode->mspBBs.Get();
@@ -1796,19 +2230,22 @@ namespace SemanticSLAM {
 						auto pTempBB = *oter;
 						auto pTempKF = pTempBB->mpKF;
 						if (pKF && pTempKF) {
+							
 							//return number of created mps
 							CreateObjectMapPoint(pKF, pTempKF, pNewBox, pTempBB, thMinDesc, thMaxDesc, pMap, pObjNode);
 							//일정값 이상일 때 추가
 						}
 					}
+					pObjNode->UpdateOrigin();
 					//pObjNode->UpdateObjectPos();
 					pObjNode->mspBBs.Update(pNewBox);
 				}
+				
 			}
-			for (auto iter = spNodes.begin(), iend = spNodes.end(); iter != iend; iter++) {
+			/*for (auto iter = spNodes.begin(), iend = spNodes.end(); iter != iend; iter++) {
 				auto pObjNode = *iter;
 				ObjectOptimizer::ObjectMapAdjustment(pObjNode);
-			}
+			}*/
 			
 			//퓨즈 및 최적화
 		}
@@ -1902,7 +2339,7 @@ namespace SemanticSLAM {
 			//pNewObjectMap->UpdateObjectPos();
 			spNodes.insert(pNewObjectMap);
 			SLAM->GlobalObjectMap.Update(pNewObjectMap);
-			ObjectOptimizer::ObjectMapAdjustment(pNewObjectMap);
+			//ObjectOptimizer::ObjectMapAdjustment(pNewObjectMap);
 			pBBox->UpdateConnections();
 		}
 		for (auto kter = vpLocalKFs.begin(), kend = vpLocalKFs.end(); kter != kend; kter++) {
@@ -2134,35 +2571,170 @@ namespace SemanticSLAM {
 				continue;
 
 			//// Triangulation is succesfull
-			EdgeSLAM::ObjectMapPoint* pMP = new EdgeSLAM::ObjectMapPoint(x3D, pBB1, pKF2, pMap, ts);
-			//((EdgeSLAM::MapPoint*)pMP)->mnObjectID = 200;
-			pBB1->mvpObjectPoints.update(idx1, pMP);
-			pBB2->mvpObjectPoints.update(idx2, pMP);
-			/*
-			pRefKeyframe->AddMapPoint(pMP, idx1);
-			pCurKeyframe->AddMapPoint(pMP, idx2);
-			pMP->AddObservation(pRefKeyframe, idx1);
-			pMP->AddObservation(pCurKeyframe, idx2);
+			EdgeSLAM::MapPoint* pMP = new EdgeSLAM::MapPoint(x3D, pKF2, pMap, ts);
+			pMP->mnObjectID = 100;
+			pBB1->mvpMapPoints.update(idx1, pMP);
+			pBB2->mvpMapPoints.update(idx2, pMP);
+
+			int kfidx1 = pBB1->mvIDXs[idx1];
+			int kfidx2 = pBB2->mvIDXs[idx2];
+
+			pKF1->AddMapPoint(pMP, kfidx1);
+			pKF2->AddMapPoint(pMP, kfidx2);
+			//pKF1->mvbOutliers[kfidx1] = false; //check error
+			//pKF2->mvbOutliers[kfidx2] = false;
+			pMP->AddObservation(pKF1, kfidx1);
+			pMP->AddObservation(pKF2, kfidx2);
 			pMP->ComputeDistinctiveDescriptors();
 			pMP->UpdateNormalAndDepth();
-
-			pCurFrame->mvpMapPoints[idx2] = pMP;
-			pCurFrame->mvbOutliers[idx2] = false;
-			
-			pMap->mlpNewMPs.push_back(pMP);*/
-			pMP->AddObservation(pBB1, idx1);
-			pMP->AddObservation(pBB2, idx2);
-			pMP->ComputeDistinctiveDescriptors();
-			pObjMap->mlpNewMPs.push_back(pMP);
-			pMP->mpObjectMap = pObjMap;
-			//pMap->AddMapPoint(pMP);
+			pMap->mlpNewMPs.push_back(pMP);
+			pMap->AddMapPoint(pMP);
 			pObjMap->mspMPs.Update(pMP);
+			////Create Object Map Points
+			//EdgeSLAM::ObjectMapPoint* pMP = new EdgeSLAM::ObjectMapPoint(x3D, pBB1, pKF2, pMap, ts);
+			////((EdgeSLAM::MapPoint*)pMP)->mnObjectID = 200;
+			//pBB1->mvpObjectPoints.update(idx1, pMP);
+			//pBB2->mvpObjectPoints.update(idx2, pMP);
+			//pMP->AddObservation(pBB1, idx1);
+			//pMP->AddObservation(pBB2, idx2);
+			//pMP->ComputeDistinctiveDescriptors();
+			//pObjMap->mlpNewMPs.push_back(pMP);
+			//pMP->mpObjectMap = pObjMap;
+			//pObjMap->mspOPs.Update(pMP);CreateObjectMapPoint
 			nMap++;
 		}//for
 		std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
 		auto du_frame = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 		float t_frame = du_frame / 1000.0;
 		//std::cout << "MapPoint Test = " << nMap <<", "<<nMatch<<" ==" << t_frame << std::endl;
+	}
+
+	int SemanticProcessor::ObjectDynamicTracking(EdgeSLAM::SLAM* SLAM, std::string user, int id, EdgeSLAM::ObjectBoundingBox* pNewBB, std::set<EdgeSLAM::ObjectBoundingBox*> setNeighObjectBBs, cv::Mat& P, const cv::Mat& K, const cv::Mat& D) {
+
+		const int nBBs = setNeighObjectBBs.size();
+		std::vector<std::vector<EdgeSLAM::MapPoint*> > vvpMapPointMatches;
+		vvpMapPointMatches.resize(nBBs);
+
+		std::vector<EdgeSLAM::ObjectBoundingBox*> vpCandidateBBs(setNeighObjectBBs.begin(), setNeighObjectBBs.end());
+
+		std::vector<bool> vbDiscarded;
+		vbDiscarded.resize(nBBs);
+
+		int nCandidates = 0;
+
+		auto thMaxDesc = SLAM->mpFeatureTracker->max_descriptor_distance;
+		auto thMinDesc = SLAM->mpFeatureTracker->min_descriptor_distance;
+
+		int nInitialMatchThresh = 5;
+		int nBoxMatchThresh = 5;
+		int nSuccessTracking = 15;
+
+		for (int i = 0; i < nBBs; i++)
+		{
+			auto pBB = vpCandidateBBs[i];
+			int nmatches = ObjectSearchPoints::SearchBoxByBoW(pBB, pNewBB, vvpMapPointMatches[i], 60, 0.75);
+			if (nmatches < nInitialMatchThresh)
+			{
+				vbDiscarded[i] = true;
+				continue;
+			}
+			else {
+				nCandidates++;
+			}
+		}
+
+		bool bMatch = false;
+		int nGood = 0;
+		while (nCandidates > 0 && !bMatch)
+		{
+			for (int i = 0; i < nBBs; i++)
+			{
+				if (vbDiscarded[i])
+					continue;
+				std::vector<bool> vbInliers;
+				int nInliers;
+				bool bNoMore;
+
+				if (vvpMapPointMatches[i].size() < nBoxMatchThresh) {
+					vbDiscarded[i] = true;
+					nCandidates--;
+					continue;
+				}
+
+				P = cv::Mat::eye(4, 4, CV_32FC1);
+				std::set<EdgeSLAM::MapPoint*> sFound;
+
+				for (size_t j = 0, jend = vvpMapPointMatches[i].size(); j < jend; j++)
+				{
+					auto pMP = vvpMapPointMatches[i][j];
+
+					if (pMP && !pMP->isBad())
+					{
+						pNewBB->mvpMapPoints.update(j, pMP);
+						sFound.insert(pMP);
+					}
+				}
+				cv::Mat inliers;
+				ObjectOptimizer::ObjectPoseInitialization(pNewBB, K, D, P, 1000,8.0,0.9,cv::SOLVEPNP_EPNP, inliers);
+				nGood = ObjectOptimizer::ObjectPoseOptimization(pNewBB, P);
+				
+				if (nGood < nBoxMatchThresh) {
+					vbDiscarded[i] = true;
+					nCandidates--;
+					continue;
+				}
+				for (int io = 0; io < pNewBB->N; io++)
+					if (pNewBB->mvbOutliers[io])
+						pNewBB->mvpMapPoints.update(io, nullptr);
+
+				if (nGood < nSuccessTracking)
+				{
+					int nadditional = ObjectSearchPoints::SearchBoxByProjection(pNewBB, vpCandidateBBs[i], sFound, P, 10, 100);
+					//std::cout << "nadditional = " << nadditional << std::endl;
+					if (nadditional + nGood >= nSuccessTracking)
+					{
+						nGood = ObjectOptimizer::ObjectPoseOptimization(pNewBB, P);
+
+						// If many inliers but still not enough, search by projection again in a narrower window
+						// the camera has been already optimized with many points
+						if (nGood > nBoxMatchThresh && nGood < nSuccessTracking)
+						{
+							sFound.clear();
+							for (int ip = 0; ip < pNewBB->N; ip++){
+								if (pNewBB->mvbOutliers[ip])
+									continue;
+								sFound.insert(pNewBB->mvpMapPoints.get(ip));
+							}
+							nadditional = ObjectSearchPoints::SearchBoxByProjection(pNewBB, vpCandidateBBs[i], sFound, P, 3, 64);
+							// Final optimization
+							if (nGood + nadditional >= nSuccessTracking)
+							{
+								nGood = ObjectOptimizer::ObjectPoseOptimization(pNewBB, P);
+								for (int io = 0; io < pNewBB->N; io++) {
+									if (pNewBB->mvbOutliers[io])
+									{
+										pNewBB->mvpMapPoints.update(io, nullptr);
+									}
+										continue;
+								}
+							}
+						}
+					}
+				}
+				if (nGood >= nSuccessTracking)
+				{
+					bMatch = true;
+					break;
+				}
+				else {
+					vbDiscarded[i] = true;
+					nCandidates--;
+				}
+
+				continue;
+			}
+		}
+		return nGood;
 	}
 
 	void SemanticProcessor::DenseOpticalFlow(EdgeSLAM::SLAM* SLAM, std::string user, int id) {

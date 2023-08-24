@@ -31,8 +31,9 @@ namespace SemanticSLAM{
 	public:
 		void static ObjectMapAdjustment(EdgeSLAM::ObjectNode* pObjMap);
 		int static ObjectPoseOptimization(EdgeSLAM::ObjectNode* pObj, EdgeSLAM::ObjectBoundingBox* pBox, std::vector<std::pair<int, int>> vecMatches);
-		int static ObjectPoseOptimization(EdgeSLAM::ObjectBoundingBox* pBox, cv::Mat& P);
-
+		int static ObjectPoseOptimization(EdgeSLAM::ObjectBoundingBox* pBox, cv::Mat& P, cv::Mat origin = cv::Mat::zeros(3,1,CV_32FC1));
+		int static ObjectPoseOptimization(EdgeSLAM::Frame* pFrame, cv::Mat& P);
+		int static ObjectPoseInitialization(EdgeSLAM::ObjectBoundingBox* pBox, const cv::Mat& K, const cv::Mat& D, cv::Mat& P, int count, float err, float confidence, int method, cv::Mat& inliers);
 	};
 }
 
