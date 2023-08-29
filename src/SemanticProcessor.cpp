@@ -298,19 +298,15 @@ namespace SemanticSLAM {
 					continue;*/
 
 				auto pMP = pTargetKF->GetMapPoint(k);
-				if (pMP && !pMP->isBad()) {
-					pBBox->mvpMapPoints.push_back(pMP);
+				if (!pMP || pMP->isBad()) {
+					pMP = nullptr;
 				}
-				else
-					pBBox->mvpMapPoints.push_back(nullptr); 
-				
 				cv::Mat row = pTargetKF->mDescriptors.row(k);
 				pBBox->mvIDXs.push_back(k);
 				pBBox->mapIDXs[k] = pBBox->mvKeys.size();
 				pBBox->mvKeys.push_back(pTargetKF->mvKeysUn[k]);
-				pBBox->mvbOutliers.push_back(false);
-				pBBox->mvpObjectPoints.push_back(nullptr);
 				pBBox->desc.push_back(row.clone());
+				pBBox->AddMapPoint(pMP);
 			}
 			
 		}
@@ -1263,8 +1259,6 @@ namespace SemanticSLAM {
 		}
 		std::cout << "ttt = 1" << std::endl;*/
 
-		
-
 		std::set<EdgeSLAM::ObjectBoundingBox*> spNewBBs;
 		if (!GraphFrameObjectBB.Count(id)) {
 			return;
@@ -1384,19 +1378,33 @@ namespace SemanticSLAM {
 				DynamicTrackingProcessor::MatchTest(pNewBox, pNeighBox, img.clone(),cv::Mat(),k);
 			}*/
 			cv::Mat P = cv::Mat::eye(4,4,CV_32FC1);
-			//DynamicTrackingProcessor::PoseRelocalization(pNewBox, setNeighObjectBBs, img, Kdouble, P);
 			//int nRes = DynamicTrackingProcessor::MatchTest(pNewBox, setNeighObjectBBs, img, Kdouble, P);
 			auto pObject = *spObjNodes.begin();
 
-			///tracking test
+			int oid = pObject->mnId;
 			pUser->mnUsed++;
+			EdgeSLAM::ObjectTrackingResult* pTracking = nullptr;
+			if (pUser->mapObjectTrackingResult.Count(oid)) {
+				pTracking = pUser->mapObjectTrackingResult.Get(oid);
+			}
+			else {
+				pTracking = new EdgeSLAM::ObjectTrackingResult(pObject, pObject->mnLabel, user);
+				pUser->mapObjectTrackingResult.Update(oid, pTracking);
+			}
+			pUser->mnUsed--;
+			if (pTracking->mState == EdgeSLAM::ObjectTrackingState::Success){
+				continue;
+			}
+			
+			///tracking test
+			/*pUser->mnUsed++;
 			if (pUser->mapObjectTrackingResult.Count(pObject->mnId)) {
 				auto pTrackRes = pUser->mapObjectTrackingResult.Get(pObject->mnId);
 				if (pTrackRes->mState == EdgeSLAM::ObjectTrackingState::Success && pTrackRes->mpLastFrame) {
 					DynamicTrackingProcessor::ObjectTracking(SLAM, mapName, pNewBox, pObject, pTrackRes, img, Kdouble, P);
 				}
 			}
-			pUser->mnUsed--;
+			pUser->mnUsed--;*/
 			///
 
 			int nRes = DynamicTrackingProcessor::ObjectRelocalization(pNewBox, pObject, img, Kdouble, P);
@@ -1408,21 +1416,6 @@ namespace SemanticSLAM {
 			float t_test1 = du_a2 / 1000.0;
 			std::cout << "Dynamic Tracking Processing time= " << " " << t_test1 <<" "<< nRes <<" "<< spObjNodes .size()<<"==" << pObject->mnId << std::endl;
 			
-			int oid = pObject->mnId;
-			pUser->mnUsed++;
-			EdgeSLAM::ObjectTrackingResult* pTracking = nullptr;
-			if (pUser->mapObjectTrackingResult.Count(oid)) {
-				pTracking = pUser->mapObjectTrackingResult.Get(oid);
-			}
-			else {
-				pTracking = new EdgeSLAM::ObjectTrackingResult(oid, pObject->mnLabel, user);
-				pUser->mapObjectTrackingResult.Update(oid, pTracking);
-			}
-			if (pTracking->mState == EdgeSLAM::ObjectTrackingState::Success) {
-				//tracking test
-				std::cout << "Object Tracking test = " << std::endl;
-			}
-			pUser->mnUsed--;
 			EdgeSLAM::ObjectTrackingState state = EdgeSLAM::ObjectTrackingState::Failed;
 			if (nRes > 10 ) {
 				state = EdgeSLAM::ObjectTrackingState::Success;
@@ -1497,7 +1490,7 @@ namespace SemanticSLAM {
 					cv::Mat OBJw = Rwc * OBJc + twc;
 					std::map<int, cv::Mat> a;
 					a[0] = OBJw;
-					SLAM->TemporalDatas2.Update("dynamic", a);
+					//SLAM->TemporalDatas2.Update("dynamic", a);
 				}
 			}
 
@@ -2110,7 +2103,15 @@ namespace SemanticSLAM {
 				}
 			}
 		}
-
+		for (auto mit = setNeighObjectBBs.begin(), mend = setNeighObjectBBs.end(); mit != mend; mit++) {
+			auto pBox = *mit;
+			auto pObj = pBox->mpNode;
+			if (!pObj)
+				continue;
+			if (!spNodes.count(pObj)) {
+				spNodes.insert(pObj);
+			}
+		}
 		if (setNeighObjectBBs.size() == 0)
 			return;
 		pUser->mnUsed++;
@@ -2118,6 +2119,9 @@ namespace SemanticSLAM {
 		int h = pUser->mpCamera->mnHeight;
 		auto pMap = pUser->mpMap;
 		pUser->mnUsed--;
+
+		std::cout << "Object Matching Test " << spNodes.size() << "=" << spNewBBs.size() << std::endl;
+
 		if (spNodes.size() > 0) {
 			//spNodes = GraphKeyFrameObject.Get(pKF);
 			//객체와 오브젝트 매칭
@@ -2125,10 +2129,18 @@ namespace SemanticSLAM {
 			//트래킹과 오브젝트 체크
 			//맵포인트 추가 : 박스와 박스 매칭
 			//최적화
-			std::cout << "Object Matching Test " <<spNodes.size()<<"="<<spNewBBs.size() << std::endl;
+			
 			auto thMaxDesc = SLAM->mpFeatureTracker->max_descriptor_distance;
 			auto thMinDesc = SLAM->mpFeatureTracker->min_descriptor_distance;
-
+			auto pObject = *spNodes.begin();
+			for (auto nter = spNewBBs.begin(), nend = spNewBBs.end(); nter != nend; nter++) {
+				auto pNewBox = *nter;
+				if (pNewBox->mvKeys.size() < 20)
+					continue;
+				pNewBox->UpdateConnections(pObject);
+				//연결 되었으면 생성하도록 변경하기
+				std::cout << "Visibility = " << pObject->mspBBs .Size()<<" " << pNewBox->GetBestCovisibilityBoxes(20).size() << std::endl;
+			}
 			////추가 매핑
 			//for (auto nter = spNewBBs.begin(), nend = spNewBBs.end(); nter != nend; nter++) {
 			//	auto pNewBox = *nter;
@@ -2238,7 +2250,7 @@ namespace SemanticSLAM {
 					}
 					pObjNode->UpdateOrigin();
 					//pObjNode->UpdateObjectPos();
-					pObjNode->mspBBs.Update(pNewBox);
+					//pObjNode->mspBBs.Update(pNewBox);
 				}
 				
 			}
@@ -2275,29 +2287,25 @@ namespace SemanticSLAM {
 		const int cnThObs = 2;
 
 		int N = 0;
-		while (lit != map->mlpNewMPs.end())
-		{
-			EdgeSLAM::ObjectMapPoint* pMP = *lit;
-			if (pMP->isBad())
-			{
-				lit = map->mlpNewMPs.erase(lit);
-			}
-			/*else if (pMP->GetFoundRatio() < 0.25f)
-			{
-				pMP->SetBadFlag();
-				lit = map->mlpNewMPs.erase(lit);
-			}*/
-			else if (((int)nCurrentKFid - (int)pMP->mnFirstKFid) >= 2 && pMP->Observations() <= cnThObs)
-			{
-				pMP->SetBadFlag();
-				lit = map->mlpNewMPs.erase(lit);
-				//N++;
-			}
-			else if (((int)nCurrentKFid - (int)pMP->mnFirstKFid) >= 3)
-				lit = map->mlpNewMPs.erase(lit);
-			else
-				lit++;
-		}
+		//while (lit != map->mlpNewMPs.end())
+		//{
+		//	EdgeSLAM::ObjectMapPoint* pMP = *lit;
+		//	if (pMP->isBad())
+		//	{
+		//		lit = map->mlpNewMPs.erase(lit);
+		//	}
+		//	else if (((int)nCurrentKFid - (int)pMP->mnFirstKFid) >= 2 && pMP->Observations() <= cnThObs)
+		//	{
+		//		pMP->SetBadFlag();
+		//		lit = map->mlpNewMPs.erase(lit);
+		//		//N++;
+		//	}
+		//	else if (((int)nCurrentKFid - (int)pMP->mnFirstKFid) >= 3)
+		//		lit = map->mlpNewMPs.erase(lit);
+		//	else
+		//		lit++;
+		//}
+
 		/*int N2 = 0;
 		auto mvpMPs = map->mspMPs.ConvertVector();
 		for (int i = 0; i < mvpMPs.size(); i++) {
@@ -2307,6 +2315,7 @@ namespace SemanticSLAM {
 		std::cout << "Object Map Test = " << mvpMPs.size() << " " << N2 << " = " << N << std::endl;*/
 	}
 
+	//이코드도 나중에 수정하기
 	//박스 생성했을 때 해당 키프레임과 연결 된 오브젝트 맵이 하나도 없을 때
 	void SemanticProcessor::ObjectMapGeneration(EdgeSLAM::SLAM* SLAM, std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs, std::set<EdgeSLAM::ObjectBoundingBox*> spNewBBs, std::set<EdgeSLAM::ObjectBoundingBox*> setNeighObjectBBs, EdgeSLAM::Map* MAP){
 	
@@ -2573,8 +2582,9 @@ namespace SemanticSLAM {
 			//// Triangulation is succesfull
 			EdgeSLAM::MapPoint* pMP = new EdgeSLAM::MapPoint(x3D, pKF2, pMap, ts);
 			pMP->mnObjectID = 100;
-			pBB1->mvpMapPoints.update(idx1, pMP);
-			pBB2->mvpMapPoints.update(idx2, pMP);
+
+			pBB1->AddMapPoint(pMP, idx1);
+			pBB2->AddMapPoint(pMP, idx2);
 
 			int kfidx1 = pBB1->mvIDXs[idx1];
 			int kfidx2 = pBB2->mvIDXs[idx2];

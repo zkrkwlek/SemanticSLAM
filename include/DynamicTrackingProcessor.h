@@ -4,6 +4,7 @@
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
+#include <opencv2/calib3d.hpp>
 #include <SLAM.h>
 #include <WebAPI.h>
 #include <Utils.h>
@@ -11,9 +12,9 @@
 #include <ConcurrentSet.h>
 #include <ConcurrentVector.h>
 
-#include <opencv2/calib3d.hpp>
 #include "PnPProblem.h"
 #include "RobustMatcher.h"
+#include "ThreadPool.h"
 
 namespace EdgeSLAM {
 	class ObjectBoundingBox;
@@ -31,9 +32,8 @@ namespace SemanticSLAM {
 		static PnPProblem pnp_detection, pnp_detection_est;
 	public:
 		static void Init();
-		static int ObjectTracking(EdgeSLAM::SLAM* SLAM, std::string name,EdgeSLAM::ObjectBoundingBox* pNewBox, EdgeSLAM::ObjectNode* pObject, EdgeSLAM::ObjectTrackingResult* pTrackRes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P);
+		static void ObjectTracking(ThreadPool::ThreadPool* POOL, EdgeSLAM::SLAM* SLAM, std::string user, EdgeSLAM::Frame* frame, const cv::Mat& img, int id);
 		static int ObjectRelocalization(EdgeSLAM::ObjectBoundingBox* pNewBox, EdgeSLAM::ObjectNode* pObject, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P);
-		static void PoseRelocalization(EdgeSLAM::ObjectBoundingBox* pNewBox, std::set<EdgeSLAM::ObjectBoundingBox*> setNeighBoxes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P);
 		static void MatchTestByFrame(EdgeSLAM::Frame* pNewFrame, std::set<EdgeSLAM::ObjectBoundingBox*> setNeighBoxes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P);
 		static int MatchTest(EdgeSLAM::ObjectBoundingBox* pNewBox, std::set<EdgeSLAM::ObjectBoundingBox*> setNeighBoxes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P);
 		static void MatchTest(EdgeSLAM::ObjectBoundingBox* pNewBox, EdgeSLAM::ObjectBoundingBox* pNeighBox, const cv::Mat& newframe, const cv::Mat& neighframe, const cv::Mat& K);
@@ -41,6 +41,9 @@ namespace SemanticSLAM {
 		//Parameter
 		static bool mbFastMatch;
 	private:
+		//tracking
+		static int ObjectTracking2(EdgeSLAM::SLAM* SLAM, std::string name, EdgeSLAM::ObjectTrackingResult* pTrackRes, EdgeSLAM::Frame* frame, const cv::Mat& newframe, int fid, const cv::Mat& K);
+
 		//kalman filter
 		static void initKalmanFilter(cv::KalmanFilter& KF, int nStates, int nMeasurements, int nInputs, double dt);
 		static void updateKalmanFilter(cv::KalmanFilter& KF, cv::Mat& measurements, cv::Mat& translation_estimated, cv::Mat& rotation_estimated);

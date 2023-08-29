@@ -23,6 +23,7 @@ namespace SemanticSLAM {
 		static const int HISTO_LENGTH;
 	public:
 		static int SearchBoxByBoW(EdgeSLAM::ObjectBoundingBox* pBB1, EdgeSLAM::ObjectBoundingBox* pBB2, std::vector<EdgeSLAM::MapPoint*>& vpMapPointMatches, float thMinDesc, float thMatchRatio, bool bCheckOri = true);
+		static int SearchObjectMapByProjection(std::vector<std::pair<int, int>>& matches, EdgeSLAM::Frame* F, const std::vector<EdgeSLAM::MapPoint*>& vpLocalMapPoints, const std::set<EdgeSLAM::MapPoint*>& sAlreadyFound, cv::Mat P, const float th, const int ORBdist, bool bCheckOri = true);
 		static int SearchFrameByProjection(EdgeSLAM::Frame* pNewFrame, EdgeSLAM::ObjectBoundingBox* pKeyBox, const std::set<EdgeSLAM::MapPoint*>& sAlreadyFound, cv::Mat P, const float th, const int ORBdist, bool bCheckOri = true);
 		static int SearchBoxByProjection(EdgeSLAM::ObjectBoundingBox* pNewBox, EdgeSLAM::ObjectBoundingBox* pKeyBox, const std::set<EdgeSLAM::MapPoint*>& sAlreadyFound, cv::Mat P, const float th, const int ORBdist, bool bCheckOri = true);
 		static int SearchObject(const cv::Mat& f1, const cv::Mat& f2, std::vector<std::pair<int, int>>& matches, float thMaxDesc, float thMinDesc, float thProjection, bool bCheckOri);

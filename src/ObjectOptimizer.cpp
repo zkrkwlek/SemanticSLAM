@@ -351,141 +351,7 @@ namespace SemanticSLAM {
 
 		return nInitialCorrespondences - nBad;
 	}
-	int ObjectOptimizer::ObjectPoseOptimization(EdgeSLAM::ObjectNode* pObj, EdgeSLAM::ObjectBoundingBox* pBox, std::vector<std::pair<int, int>> vecMatches) {
-		g2o::SparseOptimizer optimizer;
-		g2o::BlockSolver_6_3::LinearSolverType* linearSolver;
-
-		linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
-
-		g2o::BlockSolver_6_3* solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
-
-		g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
-		optimizer.setAlgorithm(solver);
-
-		int nInitialCorrespondences = 0;
-
-		// Set Frame vertex
-		std::cout << "Pose = " << pObj->GetObjectPose() << std::endl;
-		g2o::VertexSE3Expmap* vSE3 = new g2o::VertexSE3Expmap();
-		vSE3->setEstimate(EdgeSLAM::Converter::toSE3Quat(pObj->GetObjectPose()));
-		vSE3->setId(0);
-		vSE3->setFixed(false);
-		optimizer.addVertex(vSE3);
-
-		// Set MapPoint vertices
-		int N = vecMatches.size();
-
-		std::vector<g2o::EdgeSE3ProjectXYZOnlyPose*> vpEdgesMono;
-		std::vector<size_t> vnIndexEdgeMono;
-		vpEdgesMono.reserve(N);
-		vnIndexEdgeMono.reserve(N);
-
-		float deltaMono = sqrt(5.991);
-
-		//auto pKF = pBox->mpKF;
-
-		{
-			//std::unique_lock<std::mutex> lock(MapPoint::mGlobalMutex);
-			for (int i = 0; i < N; i++) {
-				int idx2 = vecMatches[i].second;
-
-				EdgeSLAM::ObjectMapPoint* pOP = pBox->mvpObjectPoints.get(idx2);
-				const cv::KeyPoint& kp = pBox->mvKeys[idx2];
-				if (pOP && !pOP->isBad()) {
-					nInitialCorrespondences++;
-					pBox->mvbOutliers[idx2] = false;
-
-					Eigen::Matrix<double, 2, 1> obs;
-					obs << kp.pt.x, kp.pt.y;
-
-					g2o::EdgeSE3ProjectXYZOnlyPose* e = new g2o::EdgeSE3ProjectXYZOnlyPose();
-
-					e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
-					e->setMeasurement(obs);
-					float invSigma2 = pBox->mvInvLevelSigma2[kp.octave];
-					e->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
-
-					g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
-					e->setRobustKernel(rk);
-					rk->setDelta(deltaMono);
-
-					e->fx = pBox->fx;
-					e->fy = pBox->fy;
-					e->cx = pBox->cx;
-					e->cy = pBox->cy;
-					cv::Mat Xw = pOP->GetObjectPos();
-					e->Xw[0] = Xw.at<float>(0);
-					e->Xw[1] = Xw.at<float>(1);
-					e->Xw[2] = Xw.at<float>(2);
-
-					optimizer.addEdge(e);
-					vpEdgesMono.push_back(e);
-					vnIndexEdgeMono.push_back(idx2);
-				}
-			}
-		}
-		std::cout << "???????? " << nInitialCorrespondences << std::endl;
-		if (nInitialCorrespondences < 3) {
-			//delete linearSolver;
-			//delete vSE3;
-			return 0;
-		}
-		// We perform 4 optimizations, after each optimization we classify observation as inlier/outlier
-		// At the next optimization, outliers are not included, but at the end they can be classified as inliers again.
-		float chi2Mono[4] = { 5.991,5.991,5.991,5.991 };
-		int its[4] = { 10,10,10,10 };
-
-		int nBad = 0;
-		for (size_t it = 0; it < 4; it++)
-		{
-
-			vSE3->setEstimate(EdgeSLAM::Converter::toSE3Quat(pObj->GetObjectPose()));
-			optimizer.initializeOptimization(0);
-			optimizer.optimize(its[it]);
-
-			nBad = 0;
-			for (size_t i = 0, iend = vpEdgesMono.size(); i < iend; i++)
-			{
-				g2o::EdgeSE3ProjectXYZOnlyPose* e = vpEdgesMono[i];
-
-				size_t idx = vnIndexEdgeMono[i];
-
-				if (pBox->mvbOutliers[idx])
-				{
-					e->computeError();
-				}
-
-				float chi2 = e->chi2();
-
-				if (chi2 > chi2Mono[it])
-				{
-					pBox->mvbOutliers[idx] = true;
-					e->setLevel(1);
-					nBad++;
-				}
-				else
-				{
-					pBox->mvbOutliers[idx] = false;
-					e->setLevel(0);
-				}
-
-				if (it == 2)
-					e->setRobustKernel(0);
-			}
-			std::cout << "Object pOse opti test = " << nBad << " " << nInitialCorrespondences << " " << optimizer.edges().size() << std::endl;
-			if (optimizer.edges().size() < 10)
-				break;
-		}
-
-		// Recover optimized pose and return number of inliers
-		g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
-		g2o::SE3Quat SE3quat_recov = vSE3_recov->estimate();
-		cv::Mat pose = EdgeSLAM::Converter::toCvMat(SE3quat_recov);
-		pObj->SetObjectPose(pose);
-
-		return nInitialCorrespondences - nBad;
-	}
-
+	
 	void ObjectOptimizer::ObjectMapAdjustment(EdgeSLAM::ObjectNode* pObjMap) {
 		auto spOPs = pObjMap->mspOPs.Get();
 		auto spBBs = pObjMap->mspBBs.Get();
@@ -557,51 +423,51 @@ namespace SemanticSLAM {
 
 		for (std::list<EdgeSLAM::ObjectMapPoint*>::iterator lit = lLocalObjectPoints.begin(), lend = lLocalObjectPoints.end(); lit != lend; lit++)
 		{
-			EdgeSLAM::ObjectMapPoint* pMP = *lit;
-			g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
-			vPoint->setEstimate(EdgeSLAM::Converter::toVector3d(pMP->GetWorldPos()));
-			int id = pMP->mnId + maxKFid + 1;
-			vPoint->setId(id);
-			vPoint->setMarginalized(true);
-			optimizer.addVertex(vPoint);
+			//EdgeSLAM::ObjectMapPoint* pMP = *lit;
+			//g2o::VertexSBAPointXYZ* vPoint = new g2o::VertexSBAPointXYZ();
+			//vPoint->setEstimate(EdgeSLAM::Converter::toVector3d(pMP->GetWorldPos()));
+			//int id = pMP->mnId + maxKFid + 1;
+			//vPoint->setId(id);
+			//vPoint->setMarginalized(true);
+			//optimizer.addVertex(vPoint);
 
-			const std::map<EdgeSLAM::ObjectBoundingBox*, size_t> observations = pMP->GetObservations();
+			//const std::map<EdgeSLAM::ObjectBoundingBox*, size_t> observations = pMP->GetObservations();
 
-			//Set edges
-			for (std::map<EdgeSLAM::ObjectBoundingBox*, size_t>::const_iterator mit = observations.begin(), mend = observations.end(); mit != mend; mit++)
-			{
-				auto pBBi = mit->first;
-				auto pKFi = pBBi->mpKF;
-				if (!pKFi->isBad())
-				{
-					const cv::KeyPoint& kpUn = pBBi->mvKeys[mit->second];
+			////Set edges
+			//for (std::map<EdgeSLAM::ObjectBoundingBox*, size_t>::const_iterator mit = observations.begin(), mend = observations.end(); mit != mend; mit++)
+			//{
+			//	auto pBBi = mit->first;
+			//	auto pKFi = pBBi->mpKF;
+			//	if (!pKFi->isBad())
+			//	{
+			//		const cv::KeyPoint& kpUn = pBBi->mvKeys[mit->second];
 
-					Eigen::Matrix<double, 2, 1> obs;
-					obs << kpUn.pt.x, kpUn.pt.y;
+			//		Eigen::Matrix<double, 2, 1> obs;
+			//		obs << kpUn.pt.x, kpUn.pt.y;
 
-					g2o::EdgeSE3ProjectXYZ* e = new g2o::EdgeSE3ProjectXYZ();
+			//		g2o::EdgeSE3ProjectXYZ* e = new g2o::EdgeSE3ProjectXYZ();
 
-					e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
-					e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
-					e->setMeasurement(obs);
-					const float& invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
-					e->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
+			//		e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(id)));
+			//		e->setVertex(1, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(pKFi->mnId)));
+			//		e->setMeasurement(obs);
+			//		const float& invSigma2 = pKFi->mvInvLevelSigma2[kpUn.octave];
+			//		e->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
 
-					g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
-					e->setRobustKernel(rk);
-					rk->setDelta(thHuberMono);
+			//		g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+			//		e->setRobustKernel(rk);
+			//		rk->setDelta(thHuberMono);
 
-					e->fx = pKFi->fx;
-					e->fy = pKFi->fy;
-					e->cx = pKFi->cx;
-					e->cy = pKFi->cy;
+			//		e->fx = pKFi->fx;
+			//		e->fy = pKFi->fy;
+			//		e->cx = pKFi->cx;
+			//		e->cy = pKFi->cy;
 
-					optimizer.addEdge(e);
-					vpEdgesMono.push_back(e);
-					vpEdgeBoxMono.push_back(pBBi);
-					vpMapPointEdgeMono.push_back(pMP);
-				}
-			}
+			//		optimizer.addEdge(e);
+			//		vpEdgesMono.push_back(e);
+			//		vpEdgeBoxMono.push_back(pBBi);
+			//		vpMapPointEdgeMono.push_back(pMP);
+			//	}
+			//}
 		}
 
 		/*if (pbStopFlag)
@@ -617,63 +483,63 @@ namespace SemanticSLAM {
 			if (*pbStopFlag)
 				bDoMore = false;*/
 
-		if (bDoMore)
-		{
+		//if (bDoMore)
+		//{
 
-			// Check inlier observations
-			for (size_t i = 0, iend = vpEdgesMono.size(); i < iend; i++)
-			{
-				g2o::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
-				EdgeSLAM::ObjectMapPoint* pMP = vpMapPointEdgeMono[i];
+		//	// Check inlier observations
+		//	for (size_t i = 0, iend = vpEdgesMono.size(); i < iend; i++)
+		//	{
+		//		g2o::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
+		//		EdgeSLAM::ObjectMapPoint* pMP = vpMapPointEdgeMono[i];
 
-				if (pMP->isBad())
-					continue;
+		//		if (pMP->isBad())
+		//			continue;
 
-				if (e->chi2() > 5.991 || !e->isDepthPositive())
-				{
-					e->setLevel(1);
-				}
+		//		if (e->chi2() > 5.991 || !e->isDepthPositive())
+		//		{
+		//			e->setLevel(1);
+		//		}
 
-				e->setRobustKernel(0);
-			}
-			// Optimize again without the outliers
-			optimizer.initializeOptimization(0);
-			optimizer.optimize(10);
+		//		e->setRobustKernel(0);
+		//	}
+		//	// Optimize again without the outliers
+		//	optimizer.initializeOptimization(0);
+		//	optimizer.optimize(10);
 
-		}
+		//}
 
-		std::vector<std::pair<EdgeSLAM::ObjectBoundingBox*, EdgeSLAM::ObjectMapPoint*> > vToErase;
-		vToErase.reserve(vpEdgesMono.size());
+		//std::vector<std::pair<EdgeSLAM::ObjectBoundingBox*, EdgeSLAM::ObjectMapPoint*> > vToErase;
+		//vToErase.reserve(vpEdgesMono.size());
 
-		// Check inlier observations       
-		for (size_t i = 0, iend = vpEdgesMono.size(); i < iend; i++)
-		{
-			g2o::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
-			EdgeSLAM::ObjectMapPoint* pOP = vpMapPointEdgeMono[i];
+		//// Check inlier observations       
+		//for (size_t i = 0, iend = vpEdgesMono.size(); i < iend; i++)
+		//{
+		//	g2o::EdgeSE3ProjectXYZ* e = vpEdgesMono[i];
+		//	EdgeSLAM::ObjectMapPoint* pOP = vpMapPointEdgeMono[i];
 
-			if (pOP->isBad())
-				continue;
+		//	if (pOP->isBad())
+		//		continue;
 
-			if (e->chi2() > 5.991 || !e->isDepthPositive())
-			{
-				EdgeSLAM::ObjectBoundingBox* pBBi = vpEdgeBoxMono[i];
-				vToErase.push_back(std::make_pair(pBBi, pOP));
-			}
-		}
+		//	if (e->chi2() > 5.991 || !e->isDepthPositive())
+		//	{
+		//		EdgeSLAM::ObjectBoundingBox* pBBi = vpEdgeBoxMono[i];
+		//		vToErase.push_back(std::make_pair(pBBi, pOP));
+		//	}
+		//}
 
-		// Get Map Mutex
-		//std::unique_lock<std::mutex> lock(pMap->mMutexMapUpdate);
+		//// Get Map Mutex
+		////std::unique_lock<std::mutex> lock(pMap->mMutexMapUpdate);
 
-		if (!vToErase.empty())
-		{
-			for (size_t i = 0; i < vToErase.size(); i++)
-			{
-				auto pKFi = vToErase[i].first;
-				auto pMPi = vToErase[i].second;
-				pKFi->EraseObjectPointMatch(pMPi);
-				pMPi->EraseObservation(pKFi);
-			}
-		}
+		//if (!vToErase.empty())
+		//{
+		//	for (size_t i = 0; i < vToErase.size(); i++)
+		//	{
+		//		auto pKFi = vToErase[i].first;
+		//		auto pMPi = vToErase[i].second;
+		//		pKFi->EraseObjectPointMatch(pMPi);
+		//		pMPi->EraseObservation(pKFi);
+		//	}
+		//}
 
 		// Recover optimized data
 
@@ -687,14 +553,14 @@ namespace SemanticSLAM {
 		}*/
 
 		//Points
-		for (std::list<EdgeSLAM::ObjectMapPoint*>::iterator lit = lLocalObjectPoints.begin(), lend = lLocalObjectPoints.end(); lit != lend; lit++)
-		{
-			EdgeSLAM::MapPoint* pMP = *lit;
-			g2o::VertexSBAPointXYZ* vPoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pMP->mnId + maxKFid + 1));
-			pMP->SetWorldPos(EdgeSLAM::Converter::toCvMat(vPoint->estimate()));
-			pMP->UpdateNormalAndDepth();
-			//pMP->mnLastUpdatedTime = ts;
-		}
+		//for (std::list<EdgeSLAM::ObjectMapPoint*>::iterator lit = lLocalObjectPoints.begin(), lend = lLocalObjectPoints.end(); lit != lend; lit++)
+		//{
+		//	EdgeSLAM::MapPoint* pMP = *lit;
+		//	g2o::VertexSBAPointXYZ* vPoint = static_cast<g2o::VertexSBAPointXYZ*>(optimizer.vertex(pMP->mnId + maxKFid + 1));
+		//	pMP->SetWorldPos(EdgeSLAM::Converter::toCvMat(vPoint->estimate()));
+		//	pMP->UpdateNormalAndDepth();
+		//	//pMP->mnLastUpdatedTime = ts;
+		//}
 
 	}
 

@@ -9,7 +9,6 @@
 #include <sstream>
 
 #include "PnPProblem.h"
-#include "Mesh.h"
 
 #include <opencv2/calib3d/calib3d.hpp>
 
@@ -65,7 +64,6 @@ PnPProblem::PnPProblem()
     R_matrix_ = cv::Mat::zeros(3, 3, CV_64FC1);   // rotation matrix
     t_matrix_ = cv::Mat::zeros(3, 1, CV_64FC1);   // translation matrix
     P_matrix_ = cv::Mat::zeros(3, 4, CV_64FC1);   // rotation-translation matrix
-
 }
 
 PnPProblem::~PnPProblem()
@@ -119,14 +117,15 @@ bool PnPProblem::estimatePose( const std::vector<cv::Point3f> &list_points3d,
 
 void PnPProblem::estimatePoseRANSAC( const std::vector<cv::Point3f> &list_points3d, // list with model 3D coordinates
                                      const std::vector<cv::Point2f> &list_points2d,     // list with scene 2D coordinates
-                                     const cv::Mat& K, int flags, cv::Mat &inliers, int iterationsCount,  // PnP method; inliers container
-                                     float reprojectionError, double confidence )    // Ransac parameters
+                                     const cv::Mat& K, const cv::Mat& rvec, const cv::Mat& tvec,
+                                     int flags, cv::Mat &inliers, int iterationsCount,  // PnP method; inliers container
+                                     float reprojectionError, double confidence, bool useExtrinsicGuess)    // Ransac parameters
 {
     cv::Mat distCoeffs = cv::Mat::zeros(4, 1, CV_64FC1);  // vector of distortion coefficients
-    cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);          // output rotation vector
-    cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64FC1);    // output translation vector
+    //cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);          // output rotation vector
+    //cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64FC1);    // output translation vector
 
-    bool useExtrinsicGuess = false;   // if true the function uses the provided rvec and tvec values as
+    //bool useExtrinsicGuess = false;   // if true the function uses the provided rvec and tvec values as
     // initial approximations of the rotation and translation vectors
 
     cv::solvePnPRansac( list_points3d, list_points2d, K, distCoeffs, rvec, tvec,

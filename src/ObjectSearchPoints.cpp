@@ -131,6 +131,141 @@ namespace SemanticSLAM {
 		return nmatches;
 	}
 
+	int ObjectSearchPoints::SearchObjectMapByProjection(std::vector<std::pair<int, int>>& matches, EdgeSLAM::Frame* pF, const std::vector<EdgeSLAM::MapPoint*>& vpLocalMapPoints, const std::set<EdgeSLAM::MapPoint*>& sAlreadyFound, cv::Mat P, const float th, const int ORBdist, bool bCheckOri) {
+		
+		std::vector<bool> bMatches = std::vector<bool>(pF->N, false);
+		cv::Mat Rcw = P.rowRange(0, 3).colRange(0, 3);
+		cv::Mat tcw = P.rowRange(0, 3).col(3);
+		cv::Mat Ow = -Rcw.t() * tcw;
+
+		std::vector<int> rotHist[HISTO_LENGTH];
+		const float factor = 1.0f / HISTO_LENGTH;
+
+		float fx = pF->fx;
+		float fy = pF->fy;
+		float cx = pF->cx;
+		float cy = pF->cy;
+		float nMinX = pF->mnMinX;
+		float nMinY = pF->mnMinY;
+		float nMaxX = pF->mnMaxX;
+		float nMaxY = pF->mnMaxY;
+
+		int nmatches = 0;
+		for (size_t i = 0, iend = vpLocalMapPoints.size(); i < iend; i++)
+		{
+			auto pMP = vpLocalMapPoints[i];
+
+			if (pMP)
+			{
+				if (!pMP->isBad() && !sAlreadyFound.count(pMP))
+				{
+					//Project
+					cv::Mat x3Dw = pMP->GetWorldPos();
+					cv::Mat x3Dc = Rcw * x3Dw + tcw;
+
+					const float xc = x3Dc.at<float>(0);
+					const float yc = x3Dc.at<float>(1);
+					const float invzc = 1.0 / x3Dc.at<float>(2);
+
+					const float u = fx * xc * invzc + cx;
+					const float v = fy * yc * invzc + cy;
+
+					if (u<nMinX || u>nMaxX)
+						continue;
+					if (v<nMinY || v>nMaxY)
+						continue;
+
+					// Compute predicted scale level
+					cv::Mat PO = x3Dw - Ow;
+					float dist3D = cv::norm(PO);
+
+					const float maxDistance = pMP->GetMaxDistanceInvariance();
+					const float minDistance = pMP->GetMinDistanceInvariance();
+
+					// Depth must be inside the scale pyramid of the image
+					if (dist3D<minDistance || dist3D>maxDistance)
+						continue;
+
+					int nPredictedLevel = pMP->PredictScale(dist3D, pF);
+
+					// Search in a window
+					const float radius = th * pF->mvScaleFactors[nPredictedLevel];
+
+					const auto vIndices2 = pF->GetFeaturesInArea(u, v, radius, nPredictedLevel - 1, nPredictedLevel + 1);
+
+					if (vIndices2.empty())
+						continue;
+
+					const cv::Mat dMP = pMP->GetDescriptor();
+
+					int bestDist = 256;
+					int bestIdx2 = -1;
+
+					for (auto vit = vIndices2.begin(); vit != vIndices2.end(); vit++)
+					{
+						const size_t i2 = *vit;
+						int newIDX = i2;
+
+						if (bMatches[newIDX])
+							continue;
+
+						const cv::Mat& d = pF->mDescriptors.row(newIDX);
+
+						const int dist = (int)Matcher->DescriptorDistance(dMP, d);
+
+						if (dist < bestDist)
+						{
+							bestDist = dist;
+							bestIdx2 = newIDX;
+						}
+					}
+
+					if (bestDist <= ORBdist)
+					{
+						bMatches[bestIdx2] = true;
+						matches.push_back(std::make_pair((int)i, (int)bestIdx2));
+						nmatches++;
+
+						/*if (bCheckOri)
+						{
+							float rot = pKeyBox->mvKeys[i].angle - pF->mvKeysUn[bestIdx2].angle;
+							if (rot < 0.0)
+								rot += 360.0f;
+							int bin = round(rot * factor);
+							if (bin == HISTO_LENGTH)
+								bin = 0;
+							assert(bin >= 0 && bin < HISTO_LENGTH);
+							rotHist[bin].push_back(bestIdx2);
+						}*/
+					}
+
+				}
+			}
+		}
+
+		if (bCheckOri)
+		{
+			int ind1 = -1;
+			int ind2 = -1;
+			int ind3 = -1;
+
+			ComputeThreeMaxima(rotHist, HISTO_LENGTH, ind1, ind2, ind3);
+
+			for (int i = 0; i < HISTO_LENGTH; i++)
+			{
+				if (i != ind1 && i != ind2 && i != ind3)
+				{
+					for (size_t j = 0, jend = rotHist[i].size(); j < jend; j++)
+					{
+						pF->mvpMapPoints[rotHist[i][j]] = nullptr;
+						nmatches--;
+					}
+				}
+			}
+		}
+		return nmatches;
+	}
+
 	int ObjectSearchPoints::SearchFrameByProjection(EdgeSLAM::Frame* pF, EdgeSLAM::ObjectBoundingBox* pKeyBox, const std::set<EdgeSLAM::MapPoint*>& sAlreadyFound, cv::Mat P, const float th, const int ORBdist, bool bCheckOri)
 	{
 		cv::Mat Rcw = P.rowRange(0, 3).colRange(0, 3);
@@ -417,54 +552,54 @@ namespace SemanticSLAM {
 
 		int Ntmp = 0;
 
-		for (int i = 0, iend = mvpMPs.size(); i < iend; i++) {
-			int idxObj = i;
-			auto pMPi = mvpMPs[i];
+		//for (int i = 0, iend = mvpMPs.size(); i < iend; i++) {
+		//	int idxObj = i;
+		//	auto pMPi = mvpMPs[i];
 
-			if (!pMPi || pMPi->isBad())
-				continue;
-			const cv::Mat& dObj = pMPi->GetDescriptor();
+		//	if (!pMPi || pMPi->isBad())
+		//		continue;
+		//	const cv::Mat& dObj = pMPi->GetDescriptor();
 
-			int bestDist1 = 256;
-			int bestIdxF = -1;
-			int bestDist2 = 256;
+		//	int bestDist1 = 256;
+		//	int bestIdxF = -1;
+		//	int bestDist2 = 256;
 
-			for (int j = 0, jend = pBox->N; j < jend; j++) {
-				int idxFrame = j;
-				if (bMatches[idxFrame])
-					continue;
-				auto pMPj = pBox->mvpObjectPoints.get(idxFrame);
-				if (pMPj && !pMPj->isBad())
-					continue;
+		//	for (int j = 0, jend = pBox->N; j < jend; j++) {
+		//		int idxFrame = j;
+		//		if (bMatches[idxFrame])
+		//			continue;
+		//		auto pMPj = pBox->mvpObjectPoints.get(idxFrame);
+		//		if (pMPj && !pMPj->isBad())
+		//			continue;
 
-				const cv::Mat& dFrame = pBox->desc.row(idxFrame);
+		//		const cv::Mat& dFrame = pBox->desc.row(idxFrame);
 
-				const int dist = (int)Matcher->DescriptorDistance(dObj, dFrame);
-				//std::cout <<"a "<< dist << std::endl;
-				if (dist < bestDist1)
-				{
-					bestDist2 = bestDist1;
-					bestDist1 = dist;
-					bestIdxF = idxFrame;
-				}
-				else if (dist < bestDist2)
-				{
-					bestDist2 = dist;
-				}
-			}//for frame
+		//		const int dist = (int)Matcher->DescriptorDistance(dObj, dFrame);
+		//		//std::cout <<"a "<< dist << std::endl;
+		//		if (dist < bestDist1)
+		//		{
+		//			bestDist2 = bestDist1;
+		//			bestDist1 = dist;
+		//			bestIdxF = idxFrame;
+		//		}
+		//		else if (dist < bestDist2)
+		//		{
+		//			bestDist2 = dist;
+		//		}
+		//	}//for frame
 
-			if (bestDist1 <= thMinDesc)
-			{
-				Ntmp++;
-				if (static_cast<float>(bestDist1) < thProjection * static_cast<float>(bestDist2))
-				{
-					bMatches[bestIdxF] = true;
-					matches.push_back(std::make_pair((int)idxObj, (int)bestIdxF));
-					nmatches++;
-				}
-			}
-			//std::cout << "matching test = " << thMinDesc << "||" << Ntmp << " " << nmatches << std::endl;
-		}
+		//	if (bestDist1 <= thMinDesc)
+		//	{
+		//		Ntmp++;
+		//		if (static_cast<float>(bestDist1) < thProjection * static_cast<float>(bestDist2))
+		//		{
+		//			bMatches[bestIdxF] = true;
+		//			matches.push_back(std::make_pair((int)idxObj, (int)bestIdxF));
+		//			nmatches++;
+		//		}
+		//	}
+		//	//std::cout << "matching test = " << thMinDesc << "||" << Ntmp << " " << nmatches << std::endl;
+		//}
 		return nmatches;
 	}
 	//박스1은 노드, 박스2는 새로운 박스

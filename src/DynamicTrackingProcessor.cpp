@@ -4,6 +4,8 @@
 #include <ObjectOptimizer.h>
 #include <ObjectSearchPoints.h>
 #include <Visualizer.h>
+#include <User.h>
+#include <PlaneEstimator.h>
 
 namespace SemanticSLAM {
 
@@ -49,10 +51,32 @@ namespace SemanticSLAM {
         double dt = 0.125;           // time between measurements (1/FPS)
         initKalmanFilter(KFilter, nStates, nMeasurements, nInputs, dt);
     }
-    
-    int DynamicTrackingProcessor::ObjectTracking(EdgeSLAM::SLAM* SLAM, std::string name, EdgeSLAM::ObjectBoundingBox* pNewBox, EdgeSLAM::ObjectNode* pObject, EdgeSLAM::ObjectTrackingResult* pTrackRes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P) {
+    void DynamicTrackingProcessor::ObjectTracking(ThreadPool::ThreadPool* POOL, EdgeSLAM::SLAM* SLAM, std::string user, EdgeSLAM::Frame* frame, const cv::Mat& _img, int id) {
+        auto pUser = SLAM->GetUser(user);
+        if (!pUser)
+            return;
+        cv::Mat img = _img.clone();
+        pUser->mnUsed++;
+        std::string mapName = pUser->mapName;
+        auto vecObjectTrackingRes = pUser->mapObjectTrackingResult.Get();
+        cv::Mat _K = pUser->GetCameraMatrix();
+        pUser->mnUsed--;
+        cv::Mat K;
+        _K.convertTo(K, CV_64FC1);
+        //thread pool tracking
+        for (auto iter = vecObjectTrackingRes.begin(), iend = vecObjectTrackingRes.end(); iter != iend; iter++) {
+            auto pTrackRes = iter->second;
+            if(pTrackRes->mState == EdgeSLAM::ObjectTrackingState::Success)
+                POOL->EnqueueJob(DynamicTrackingProcessor::ObjectTracking2, SLAM, mapName, pTrackRes, frame, img, id, K);
+            //ObjectTracking(SLAM, mapName, pTrackRes, img, id, K)
+        }
+    }
+    int DynamicTrackingProcessor::ObjectTracking2(EdgeSLAM::SLAM* SLAM, std::string name, EdgeSLAM::ObjectTrackingResult* pTrackRes, EdgeSLAM::Frame* frame, const cv::Mat& newframe, int fid, const cv::Mat& K) {
         auto pTrackFrame = pTrackRes->mpLastFrame;
+        auto pObject = pTrackRes->mpObject;
         //일단 옵티컬 플로우로 테스트부터
+        
+        cv::Mat P = pTrackRes->Pose.clone();
 
         int win_size = 10;
         std::vector<cv::Point2f> cornersB;
@@ -77,6 +101,8 @@ namespace SemanticSLAM {
 
         std::vector<cv::Point2f> imagePoints;
         std::vector<cv::Point3f> objectPoints;
+        std::vector<EdgeSLAM::MapPoint*> mapPoints;
+        std::set<EdgeSLAM::MapPoint*> sFound;
         int nGood = 0;
         for (int i = 0; i < static_cast<int>(pTrackFrame->mvImagePoints.size()); ++i) {
             if (!features_found[i]) {
@@ -101,9 +127,11 @@ namespace SemanticSLAM {
             cv::Point3f objPt(temp);
             imagePoints.push_back(imgPt);
             objectPoints.push_back(objPt);
-
+            mapPoints.push_back(pMPi);
+            sFound.insert(pMPi);
         }
-
+        int nRes = 0;
+        cv::Mat inliers_idx;
         if (nGood > 6) {
             // RANSAC parameters
             int iterationsCount = 1000;      // number of Ransac iterations.
@@ -113,28 +141,32 @@ namespace SemanticSLAM {
             // Kalman Filter parameters
             int minInliersKalman = 15;    // Kalman threshold updating
             int pnpMethod = cv::SOLVEPNP_EPNP;
-            cv::Mat inliers_idx;
+            
             std::vector<cv::Point2f> list_points2d_inliers;
 
             int nMeasurements = 6;
             cv::Mat measurements(nMeasurements, 1, CV_64FC1); measurements.setTo(cv::Scalar(0));
             bool good_measurement = false;
-
+            cv::Mat R = P.rowRange(0, 3).colRange(0, 3);
+            cv::Mat t = P.rowRange(0, 3).col(3);
             cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64FC1);
             cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64FC1);
+            cv::Rodrigues(R, rvec);
+            rvec.convertTo(rvec, CV_64FC1);
+            t.convertTo(tvec, CV_64FC1);
 
             // -- Step 3: Estimate the pose using RANSAC approach
             pnp_detection.estimatePoseRANSAC(objectPoints, imagePoints,
-                K, pnpMethod, inliers_idx,
-                iterationsCount, reprojectionError, confidence);
+                K, rvec, tvec, pnpMethod, inliers_idx,
+                iterationsCount, reprojectionError, confidence, true);
 
-            // -- Step 4: Catch the inliers keypoints to draw
-            for (int inliers_index = 0; inliers_index < inliers_idx.rows; ++inliers_index)
-            {
-                int n = inliers_idx.at<int>(inliers_index);         // i-inlier
-                cv::Point2f point2d = imagePoints[n];     // i-inlier point 2D
-                list_points2d_inliers.push_back(point2d);           // add i-inlier to list
-            }
+            //// -- Step 4: Catch the inliers keypoints to draw
+            //for (int inliers_index = 0; inliers_index < inliers_idx.rows; ++inliers_index)
+            //{
+            //    int n = inliers_idx.at<int>(inliers_index);         // i-inlier
+            //    cv::Point2f point2d = imagePoints[n];     // i-inlier point 2D
+            //    list_points2d_inliers.push_back(point2d);           // add i-inlier to list
+            //}
 
             // Draw inliers points 2D
             //draw2DPoints(frame_vis, list_points2d_inliers, cv::Scalar(255, 255, 0));
@@ -163,17 +195,82 @@ namespace SemanticSLAM {
             // -- Step 6: Set estimated projection matrix
             pnp_detection_est.set_P_matrix(rotation_estimated, translation_estimated);
 
-            if (good_measurement)
+            /*if (good_measurement)
             {
                 P = pnp_detection_est.get_P_matrix();
             }
             else {
                 P = pnp_detection.get_P_matrix();
-            }
+            }*/
+            P = pnp_detection_est.get_P_matrix();
             P.convertTo(P, CV_32FC1);
             cv::Mat D = cv::Mat::zeros(4, 1, CV_64FC1);
         
-            float l = 2;
+            //프로젝션 매칭
+            Plane* Floor = nullptr;
+            if (PlaneEstimator::GlobalFloor)
+            {
+                Floor = PlaneEstimator::GlobalFloor;
+            }
+            EdgeSLAM::ObjectLocalMap* LocalObjectMap = new EdgeSLAM::ObjectLocalMap(mapPoints);
+            std::vector<std::pair<int, int>> matches;
+            int nAdditional = ObjectSearchPoints::SearchObjectMapByProjection(matches, frame, LocalObjectMap->mvpLocalMapPoints, sFound, P, 10, 100, false);
+            std::cout << "Local Map Test = " <<nAdditional<<" ==" << LocalObjectMap->mvpLocalBoxes.size() << " " << LocalObjectMap->mvpLocalMapPoints.size() << std::endl;
+            //최적화
+            for (int i = 0, N = matches.size(); i < N; i++) {
+                int idx1 = matches[i].first;
+                int idx2 = matches[i].second;
+
+                auto pMPi = LocalObjectMap->mvpLocalMapPoints[idx1];
+                if (!pMPi || pMPi->isBad())
+                    continue;
+
+                if (Floor) {
+                    float dist = Floor->Distacne(pMPi->GetWorldPos());
+                    if (abs(dist) < 0.1)
+                        continue;
+                }
+
+                cv::Mat temp = pMPi->GetWorldPos() - pObject->GetOrigin();
+                cv::Point3f objPt(temp);
+                auto pt = frame->mvKeys[idx2].pt;
+                imagePoints.push_back(pt);
+                objectPoints.push_back(objPt);
+				mapPoints.push_back(pMPi);
+            }
+            R = P.rowRange(0, 3).colRange(0, 3);
+            t = P.rowRange(0, 3).col(3);
+            cv::Rodrigues(R, rvec);
+            rvec.convertTo(rvec, CV_64FC1);
+            t.convertTo(tvec, CV_64FC1);
+            pnp_detection.estimatePoseRANSAC(objectPoints, imagePoints,
+                K, rvec, tvec, pnpMethod, inliers_idx,
+                iterationsCount, reprojectionError, confidence, true);
+            
+            for (int inliers_index = 0; inliers_index < inliers_idx.rows; ++inliers_index)
+            {
+                int n = inliers_idx.at<int>(inliers_index);         // i-inlier
+                cv::Point2f point2d = imagePoints[n];     // i-inlier point 2D
+                list_points2d_inliers.push_back(point2d);           // add i-inlier to list
+            }
+            draw2DPoints(tempFrame, list_points2d_inliers, cv::Scalar(0, 255, 255));
+            
+            if (inliers_idx.rows >= minInliersKalman)
+            {
+                // Get the measured translation
+                cv::Mat translation_measured = pnp_detection.get_t_matrix();
+
+                // Get the measured rotation
+                cv::Mat rotation_measured = pnp_detection.get_R_matrix();
+
+                // fill the measurements vector
+                fillMeasurements(measurements, translation_measured, rotation_measured);
+                good_measurement = true;
+            }
+            P = pnp_detection_est.get_P_matrix();
+            P.convertTo(P, CV_32FC1);
+
+            float l = 1;
             std::vector<cv::Point2f> pose_points2d;
             pose_points2d.push_back(pnp_detection_est.backproject3DPoint(cv::Point3f(0, 0, 0), K));  // axis center
             pose_points2d.push_back(pnp_detection_est.backproject3DPoint(cv::Point3f(l, 0, 0), K));  // axis x
@@ -181,8 +278,38 @@ namespace SemanticSLAM {
             pose_points2d.push_back(pnp_detection_est.backproject3DPoint(cv::Point3f(0, 0, l), K));  // axis z
             draw3DCoordinateAxes(tempFrame, pose_points2d);
 
+            nRes = inliers_idx.rows;
         }
         
+        //update
+        pTrackRes->mnLastTrackFrameId = fid;
+        if (nRes > 15) {
+            pTrackRes->Pose = P.clone();
+            pTrackRes->mState = EdgeSLAM::ObjectTrackingState::Success;
+            pTrackRes->mnLastSuccessFrameId = fid;
+            pTrackRes->Pose = P.clone();
+            auto pTrackFrame = pTrackRes->mpLastFrame;
+            pTrackFrame->mvImagePoints.clear();
+            pTrackFrame->mvpMapPoints.clear();
+            pTrackFrame->mvImagePoints.reserve(nRes);
+            pTrackFrame->mvpMapPoints.reserve(nRes);
+            //EdgeSLAM::ObjectTrackingFrame* pTrackFrame = new EdgeSLAM::ObjectTrackingFrame();
+            for (int i = 0; i < inliers_idx.rows; ++i)
+            {
+                int idx = inliers_idx.at<int>(i);         // i-inlier
+                auto pMPi = mapPoints[idx];
+                if (!pMPi || pMPi->isBad())
+                    continue;
+                cv::Point2f pt = imagePoints[idx];
+                pTrackFrame->mvImagePoints.push_back(pt);
+                pTrackFrame->mvpMapPoints.push_back(pMPi);
+             
+            }
+            pTrackFrame->frame = newframe.clone();
+        }
+        else {
+            pTrackRes->mState = EdgeSLAM::ObjectTrackingState::Failed;
+        }
 
         SLAM->VisualizeImage(name, tempFrame, 2);
     }
@@ -268,7 +395,7 @@ namespace SemanticSLAM {
 
             // -- Step 3: Estimate the pose using RANSAC approach
             pnp_detection.estimatePoseRANSAC(objectPoints, imagePoints,
-                K, pnpMethod, inliers_idx,
+                K, rvec, tvec, pnpMethod, inliers_idx,
                 iterationsCount, reprojectionError, confidence);
 
             // -- Step 4: Catch the inliers keypoints to draw
@@ -417,161 +544,6 @@ namespace SemanticSLAM {
         return 0;
     }
 
-    void DynamicTrackingProcessor::PoseRelocalization(EdgeSLAM::ObjectBoundingBox* pNewBox, std::set<EdgeSLAM::ObjectBoundingBox*> setNeighBoxes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P) {
-
-        const int nBBs = setNeighBoxes.size();
-        std::vector<std::vector<EdgeSLAM::MapPoint*> > vvpMapPointMatches(nBBs);
-
-        std::vector<EdgeSLAM::ObjectBoundingBox*> vpCandidateBBs(setNeighBoxes.begin(), setNeighBoxes.end());
-        std::vector<bool> vbDiscarded;
-        vbDiscarded.resize(nBBs);
-
-        int nCandidates = 0;
-
-        auto thMaxDesc = 100;
-        auto thMinDesc = 50;
-
-        int nInitialMatchThresh = 5;
-        int nBoxMatchThresh = 5;
-        int nSuccessTracking = 15;
-
-        // RANSAC parameters
-        int iterationsCount = 1000;      // number of Ransac iterations.
-        float reprojectionError = 8.0;  // maximum allowed distance to consider it an inlier.
-        double confidence = 0.9;       // ransac successful confidence.
-
-        // Kalman Filter parameters
-        int minInliersKalman = 15;    // Kalman threshold updating
-        int pnpMethod = cv::SOLVEPNP_EPNP;
-        
-        int nMeasurements = 6;
-        cv::Mat measurements(nMeasurements, 1, CV_64FC1); measurements.setTo(cv::Scalar(0));
-        bool good_measurement = false;
-
-        for (int i = 0; i < nBBs; i++)
-        {
-            auto pNeighBox = vpCandidateBBs[i];
-            
-            std::vector<cv::DMatch> good_matches;
-            std::vector<EdgeSLAM::MapPoint*> tempMPs(pNewBox->N);
-            rmatcher.robustMatch(newframe, cv::Mat(), pNewBox->mvKeys, pNewBox->desc, pNeighBox->mvKeys, pNeighBox->desc, good_matches);
-
-            int nMatch = 0;
-            for (unsigned int match_index = 0; match_index < good_matches.size(); ++match_index)
-            {
-                int newIdx = good_matches[match_index].queryIdx;
-                int neighIdx = good_matches[match_index].trainIdx;
-
-                auto pMPi = pNeighBox->mvpMapPoints.get(neighIdx);
-                                
-                if (!pMPi || pMPi->isBad())
-                    continue;
-                tempMPs[newIdx] = pMPi;
-                nMatch++;
-            }
-            vvpMapPointMatches[i] = tempMPs;
-            if (nMatch < nInitialMatchThresh) {
-                vbDiscarded[i] = true;
-            }
-            else
-                nCandidates++;
-        }
-        std::cout << "Initial Matching = " << nCandidates << std::endl;
-
-        bool bMatch = false;
-        int nGood = 0;
-        P = cv::Mat::eye(4, 4, CV_32FC1);
-        cv::Mat D = cv::Mat::zeros(4, 1, CV_64FC1);
-        while (nCandidates > 0 && !bMatch)
-        {
-            for (int i = 0; i < nBBs; i++)
-            {
-                if (vbDiscarded[i])
-                    continue;
-                std::vector<bool> vbInliers;
-                int nInliers;
-                bool bNoMore;
-
-                if (vvpMapPointMatches[i].size() < nBoxMatchThresh) {
-                    vbDiscarded[i] = true;
-                    nCandidates--;
-                    continue;
-                }
-
-                std::set<EdgeSLAM::MapPoint*> sFound;
-                for (size_t j = 0, jend = vvpMapPointMatches[i].size(); j < jend; j++)
-                {
-                    auto pMP = vvpMapPointMatches[i][j];
-                    if (pMP && !pMP->isBad())
-                    {
-                        pNewBox->mvpMapPoints.update(j, pMP);
-                        sFound.insert(pMP);
-                    }
-                }
-                cv::Mat inliers_idx;
-                std::vector<cv::Point2f> list_points2d_inliers;
-                ObjectOptimizer::ObjectPoseInitialization(pNewBox, K, D, P, iterationsCount, reprojectionError, confidence, pnpMethod, inliers_idx);
-                nGood = ObjectOptimizer::ObjectPoseOptimization(pNewBox, P);
-
-                if (nGood < nBoxMatchThresh) {
-                    vbDiscarded[i] = true;
-                    nCandidates--;
-                    continue;
-                }
-                for (int io = 0; io < pNewBox->N; io++)
-                    if (pNewBox->mvbOutliers[io])
-                        pNewBox->mvpMapPoints.update(io, nullptr);
-                if (nGood < nSuccessTracking)
-                {
-                    int nadditional = ObjectSearchPoints::SearchBoxByProjection(pNewBox, vpCandidateBBs[i], sFound, P, 10, 100);
-                    //std::cout << "nadditional = " << nadditional << std::endl;
-                    if (nadditional + nGood >= nSuccessTracking)
-                    {
-                        nGood = ObjectOptimizer::ObjectPoseOptimization(pNewBox, P);
-
-                        // If many inliers but still not enough, search by projection again in a narrower window
-                        // the camera has been already optimized with many points
-                        if (nGood > nBoxMatchThresh && nGood < nSuccessTracking)
-                        {
-                            sFound.clear();
-                            for (int ip = 0; ip < pNewBox->N; ip++) {
-                                if (pNewBox->mvbOutliers[ip])
-                                    continue;
-                                sFound.insert(pNewBox->mvpMapPoints.get(ip));
-                            }
-                            nadditional = ObjectSearchPoints::SearchBoxByProjection(pNewBox, vpCandidateBBs[i], sFound, P, 3, 64);
-                            // Final optimization
-                            if (nGood + nadditional >= nSuccessTracking)
-                            {
-                                nGood = ObjectOptimizer::ObjectPoseOptimization(pNewBox, P);
-                                for (int io = 0; io < pNewBox->N; io++) {
-                                    if (pNewBox->mvbOutliers[io])
-                                    {
-                                        pNewBox->mvpMapPoints.update(io, nullptr);
-                                    }
-                                    continue;
-                                }
-                            }
-                        }
-                    }
-                }
-                if (nGood >= nSuccessTracking)
-                {
-                    bMatch = true;
-                    break;
-                }
-                else {
-                    vbDiscarded[i] = true;
-                    nCandidates--;
-                }
-
-                continue;
-
-            }//for
-        }//while
-
-    }
-    
     void DynamicTrackingProcessor::MatchTestByFrame(EdgeSLAM::Frame* pNewFrame, std::set<EdgeSLAM::ObjectBoundingBox*> setNeighBoxes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P) {
     
         const int nBBs = setNeighBoxes.size();
@@ -647,7 +619,7 @@ namespace SemanticSLAM {
             
             // -- Step 3: Estimate the pose using RANSAC approach
             pnp_detection.estimatePoseRANSAC(objectPoints, imagePoints,
-                K, pnpMethod, inliers_idx,
+                K, rvec, tvec,pnpMethod, inliers_idx,
                 iterationsCount, reprojectionError, confidence);
 
             // -- Step 4: Catch the inliers keypoints to draw
@@ -875,7 +847,7 @@ namespace SemanticSLAM {
 
             // -- Step 3: Estimate the pose using RANSAC approach
             pnp_detection.estimatePoseRANSAC(objectPoints, imagePoints,
-                K, pnpMethod, inliers_idx,
+                K, rvec, tvec, pnpMethod, inliers_idx,
                 iterationsCount, reprojectionError, confidence);
             
             // -- Step 4: Catch the inliers keypoints to draw
@@ -1075,9 +1047,9 @@ namespace SemanticSLAM {
         if (nGood >= 4) // OpenCV requires solvePnPRANSAC to minimally have 4 set of points
         {
             // -- Step 3: Estimate the pose using RANSAC approach
-            pnp_detection.estimatePoseRANSAC(list_points3d_model_match, list_points2d_scene_match,
-                K, pnpMethod, inliers_idx,
-                iterationsCount, reprojectionError, confidence);
+            /*pnp_detection.estimatePoseRANSAC(list_points3d_model_match, list_points2d_scene_match,
+                K, rvec, tvec, pnpMethod, inliers_idx,
+                iterationsCount, reprojectionError, confidence);*/
             std::cout << "inlier test = " << inliers_idx.rows << std::endl;
             // -- Step 4: Catch the inliers keypoints to draw
             for (int inliers_index = 0; inliers_index < inliers_idx.rows; ++inliers_index)
