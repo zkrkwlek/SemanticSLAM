@@ -22,38 +22,31 @@ namespace EdgeSLAM {
 	class ObjectTrackingResult;
 	class ObjectTrackingFrame;
 	class Frame;
+	
 }
 namespace SemanticSLAM {
-
+	class DynamicObjectMap;
 	class DynamicTrackingProcessor {
 	public:
 		static RobustMatcher rmatcher;
-		static cv::KalmanFilter KFilter;
 		static PnPProblem pnp_detection, pnp_detection_est;
+		static ConcurrentMap<int, DynamicObjectMap*> MapDynaObject;
 	public:
 		static void Init();
+		static void UpdateKalmanFilter(int objID, int nPnP, cv::Mat _Pcw, cv::Mat _Pco, cv::Mat& Pwo);
 		static void ObjectTracking(ThreadPool::ThreadPool* POOL, EdgeSLAM::SLAM* SLAM, std::string user, EdgeSLAM::Frame* frame, const cv::Mat& img, int id);
 		static int ObjectRelocalization(EdgeSLAM::ObjectBoundingBox* pNewBox, EdgeSLAM::ObjectNode* pObject, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P);
-		static void MatchTestByFrame(EdgeSLAM::Frame* pNewFrame, std::set<EdgeSLAM::ObjectBoundingBox*> setNeighBoxes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P);
-		static int MatchTest(EdgeSLAM::ObjectBoundingBox* pNewBox, std::set<EdgeSLAM::ObjectBoundingBox*> setNeighBoxes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P);
-		static void MatchTest(EdgeSLAM::ObjectBoundingBox* pNewBox, EdgeSLAM::ObjectBoundingBox* pNeighBox, const cv::Mat& newframe, const cv::Mat& neighframe, const cv::Mat& K);
 	private:
 		//Parameter
 		static bool mbFastMatch;
 	private:
 		//tracking
-		static int ObjectTracking2(EdgeSLAM::SLAM* SLAM, std::string name, EdgeSLAM::ObjectTrackingResult* pTrackRes, EdgeSLAM::Frame* frame, const cv::Mat& newframe, int fid, const cv::Mat& K);
+		static int ObjectTracking2(EdgeSLAM::SLAM* SLAM, EdgeSLAM::ObjectTrackingResult* pTrackRes, EdgeSLAM::Frame* frame, const cv::Mat& newframe, int fid, const cv::Mat& K);
 
-		//kalman filter
-		static void initKalmanFilter(cv::KalmanFilter& KF, int nStates, int nMeasurements, int nInputs, double dt);
-		static void updateKalmanFilter(cv::KalmanFilter& KF, cv::Mat& measurements, cv::Mat& translation_estimated, cv::Mat& rotation_estimated);
-		static void fillMeasurements(cv::Mat& measurements, const cv::Mat& translation_measured, const cv::Mat& rotation_measured);
 	private:
 		//utils
 		static void createFeatures(const std::string& featureName, int numKeypoints, cv::Ptr<cv::Feature2D>& detector, cv::Ptr<cv::Feature2D>& descriptor);
 		static cv::Ptr<cv::DescriptorMatcher> createMatcher(const std::string& featureName, bool useFLANN);
-		static cv::Mat rot2euler(const cv::Mat& rotationMatrix);
-		static cv::Mat euler2rot(const cv::Mat& euler);
 	private:
 		//draw
 		static void draw2DPoints(cv::Mat image, std::vector<cv::Point2f>& list_points, cv::Scalar color);

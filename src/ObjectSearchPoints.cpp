@@ -131,7 +131,7 @@ namespace SemanticSLAM {
 		return nmatches;
 	}
 
-	int ObjectSearchPoints::SearchObjectMapByProjection(std::vector<std::pair<int, int>>& matches, EdgeSLAM::Frame* pF, const std::vector<EdgeSLAM::MapPoint*>& vpLocalMapPoints, const std::set<EdgeSLAM::MapPoint*>& sAlreadyFound, cv::Mat P, const float th, const int ORBdist, bool bCheckOri) {
+	int ObjectSearchPoints::SearchObjectMapByProjection(std::vector<std::pair<int, int>>& matches, EdgeSLAM::Frame* pF, const std::vector<EdgeSLAM::MapPoint*>& vpLocalMapPoints, const std::set<EdgeSLAM::MapPoint*>& sAlreadyFound, cv::Mat P, cv::Mat origin, const float th, const int ORBdist, bool bCheckOri) {
 		
 		std::vector<bool> bMatches = std::vector<bool>(pF->N, false);
 		cv::Mat Rcw = P.rowRange(0, 3).colRange(0, 3);
@@ -160,7 +160,7 @@ namespace SemanticSLAM {
 				if (!pMP->isBad() && !sAlreadyFound.count(pMP))
 				{
 					//Project
-					cv::Mat x3Dw = pMP->GetWorldPos();
+					cv::Mat x3Dw = pMP->GetWorldPos()-origin;
 					cv::Mat x3Dc = Rcw * x3Dw + tcw;
 
 					const float xc = x3Dc.at<float>(0);

@@ -352,6 +352,139 @@ namespace SemanticSLAM {
 		return nInitialCorrespondences - nBad;
 	}
 	
+	int ObjectOptimizer::ObjectPoseOptimization(std::vector<cv::Point2f> imgPts, std::vector<cv::Point3f> objPts, std::vector<bool>& outliers, cv::Mat& P, float fx, float fy, float cx, float cy) {
+		g2o::SparseOptimizer optimizer;
+		g2o::BlockSolver_6_3::LinearSolverType* linearSolver;
+
+		linearSolver = new g2o::LinearSolverDense<g2o::BlockSolver_6_3::PoseMatrixType>();
+
+		g2o::BlockSolver_6_3* solver_ptr = new g2o::BlockSolver_6_3(linearSolver);
+
+		g2o::OptimizationAlgorithmLevenberg* solver = new g2o::OptimizationAlgorithmLevenberg(solver_ptr);
+		optimizer.setAlgorithm(solver);
+
+		int nInitialCorrespondences = 0;
+
+		// Set Frame vertex
+		//P = cv::Mat::eye(4, 4, CV_32FC1);
+		g2o::VertexSE3Expmap* vSE3 = new g2o::VertexSE3Expmap();
+		vSE3->setEstimate(EdgeSLAM::Converter::toSE3Quat(P));
+		vSE3->setId(0);
+		vSE3->setFixed(false);
+		optimizer.addVertex(vSE3);
+
+		// Set MapPoint vertices
+		int N = imgPts.size();
+
+		std::vector<g2o::EdgeSE3ProjectXYZOnlyPose*> vpEdgesMono;
+		std::vector<size_t> vnIndexEdgeMono;
+		vpEdgesMono.reserve(N);
+		vnIndexEdgeMono.reserve(N);
+
+		float th = 10.0;//5.991;
+		float deltaMono = sqrt(th);
+
+		float Na = 0;
+		{
+			
+			for (int i = 0; i < N; i++) {
+
+				auto imgpt = imgPts[i];
+				auto objpt = objPts[i];
+				nInitialCorrespondences++;
+				
+				Eigen::Matrix<double, 2, 1> obs;
+				obs << imgpt.x, imgpt.y;
+
+				g2o::EdgeSE3ProjectXYZOnlyPose* e = new g2o::EdgeSE3ProjectXYZOnlyPose();
+
+				e->setVertex(0, dynamic_cast<g2o::OptimizableGraph::Vertex*>(optimizer.vertex(0)));
+				e->setMeasurement(obs);
+				float invSigma2 = 1.0f;// pBox->mvInvLevelSigma2[kp.octave];
+				e->setInformation(Eigen::Matrix2d::Identity() * invSigma2);
+
+				g2o::RobustKernelHuber* rk = new g2o::RobustKernelHuber;
+				e->setRobustKernel(rk);
+				rk->setDelta(deltaMono);
+
+				e->fx = fx;
+				e->fy = fy;
+				e->cx = cx;
+				e->cy = cy;
+				
+				e->Xw[0] = objpt.x;
+				e->Xw[1] = objpt.y;
+				e->Xw[2] = objpt.z;
+
+				optimizer.addEdge(e);
+				vpEdgesMono.push_back(e);
+				vnIndexEdgeMono.push_back(i);
+			}
+		}
+
+		if (nInitialCorrespondences < 3) {
+			//delete linearSolver;
+			//delete vSE3;
+			return 0;
+		}
+
+		float chi2Mono[4] = { th,th,th,th };
+		int its[4] = { 10,10,10,10 };
+
+		int nBad = 0;
+		for (size_t it = 0; it < 4; it++)
+		{
+
+			vSE3->setEstimate(EdgeSLAM::Converter::toSE3Quat(P));
+			optimizer.initializeOptimization(0);
+			optimizer.optimize(its[it]);
+
+			nBad = 0;
+			for (size_t i = 0, iend = vpEdgesMono.size(); i < iend; i++)
+			{
+				g2o::EdgeSE3ProjectXYZOnlyPose* e = vpEdgesMono[i];
+
+				size_t idx = vnIndexEdgeMono[i];
+
+				if (outliers[idx])
+				{
+					e->computeError();
+				}
+
+				float chi2 = e->chi2();
+
+				if (chi2 > chi2Mono[it])
+				{
+					outliers[idx] = true;
+					e->setLevel(1);
+					nBad++;
+				}
+				else
+				{
+					outliers[idx] = false;
+					e->setLevel(0);
+				}
+
+				if (it == 2)
+					e->setRobustKernel(0);
+			}
+			if (nBad == nInitialCorrespondences)
+				break;
+			//std::cout << "Object pOse opti test = " << nBad << " " << nInitialCorrespondences << " " << optimizer.edges().size() << std::endl;
+			if (optimizer.edges().size() < 10)
+				break;
+		}
+
+		// Recover optimized pose and return number of inliers
+		g2o::VertexSE3Expmap* vSE3_recov = static_cast<g2o::VertexSE3Expmap*>(optimizer.vertex(0));
+		g2o::SE3Quat SE3quat_recov = vSE3_recov->estimate();
+		cv::Mat pose = EdgeSLAM::Converter::toCvMat(SE3quat_recov);
+		P = pose.clone();
+		//std::cout << "Test obj pose = " << pose <<avgPos.t()<< std::endl;
+
+		return nInitialCorrespondences - nBad;
+	}
+
 	void ObjectOptimizer::ObjectMapAdjustment(EdgeSLAM::ObjectNode* pObjMap) {
 		auto spOPs = pObjMap->mspOPs.Get();
 		auto spBBs = pObjMap->mspBBs.Get();

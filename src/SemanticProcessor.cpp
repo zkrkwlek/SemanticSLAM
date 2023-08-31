@@ -20,6 +20,7 @@
 #include <SLAM.h>
 
 #include <DynamicTrackingProcessor.h>
+#include <DynamicObjectMap.h>
 
 namespace SemanticSLAM {
 	SemanticProcessor::SemanticProcessor() {}
@@ -2350,6 +2351,10 @@ namespace SemanticSLAM {
 			SLAM->GlobalObjectMap.Update(pNewObjectMap);
 			//ObjectOptimizer::ObjectMapAdjustment(pNewObjectMap);
 			pBBox->UpdateConnections();
+
+			DynamicObjectMap* pTempMap = new DynamicObjectMap();
+			DynamicTrackingProcessor::MapDynaObject.Update(pNewObjectMap->mnId, pTempMap);
+
 		}
 		for (auto kter = vpLocalKFs.begin(), kend = vpLocalKFs.end(); kter != kend; kter++) {
 			auto pKFi = *kter;
