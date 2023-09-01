@@ -323,7 +323,10 @@ namespace SemanticSLAM {
 						continue;
 
 					int nPredictedLevel = pMP->PredictScale(dist3D, pF);
-
+					if (nPredictedLevel >= pF->mvScaleFactors.size()) {
+						std::cout << "Error = Predicted Level " << nPredictedLevel << " " << pF->mvScaleFactors.size() << std::endl;
+						continue;
+					}
 					// Search in a window
 					const float radius = th * pF->mvScaleFactors[nPredictedLevel];
 

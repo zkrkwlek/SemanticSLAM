@@ -1408,7 +1408,7 @@ namespace SemanticSLAM {
 			pUser->mnUsed--;*/
 			///
 
-			int nRes = DynamicTrackingProcessor::ObjectRelocalization(pNewBox, pObject, img, Kdouble, P);
+			int nRes = DynamicTrackingProcessor::ObjectRelocalization(pNewBox, pObject, pTracking, img, Kdouble, P);
 			//DynamicTrackingProcessor::MatchTestByFrame(pNewBox->mpF, setNeighObjectBBs, img, Kdouble, P);
 			
 			//int nMatch = ObjectDynamicTracking(SLAM, user, id, pNewBox, setNeighObjectBBs, P, Kdouble, d);
@@ -1417,7 +1417,7 @@ namespace SemanticSLAM {
 			float t_test1 = du_a2 / 1000.0;
 			std::cout << "Dynamic Tracking Processing time= " << " " << t_test1 <<" "<< nRes <<" "<< spObjNodes .size()<<"==" << pObject->mnId << std::endl;
 			
-			EdgeSLAM::ObjectTrackingState state = EdgeSLAM::ObjectTrackingState::Failed;
+			/*EdgeSLAM::ObjectTrackingState state = EdgeSLAM::ObjectTrackingState::Failed;
 			if (nRes > 10 ) {
 				state = EdgeSLAM::ObjectTrackingState::Success;
 				pTracking->mnLastSuccessFrameId = id;
@@ -1438,7 +1438,7 @@ namespace SemanticSLAM {
 				pTracking->mpLastFrame = pTrackFrame;
 			}
 			pTracking->mState = state;
-			pTracking->mnLastSuccessFrameId = id;
+			pTracking->mnLastSuccessFrameId = id;*/
 
 			//visualization
 			{
