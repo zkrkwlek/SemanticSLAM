@@ -7,7 +7,6 @@
 #include <User.h>
 #include <PlaneEstimator.h>
 #include <KalmanFilter.h>
-#include <DynamicObjectMap.h>
 
 namespace SemanticSLAM {
 
@@ -15,7 +14,6 @@ namespace SemanticSLAM {
     PnPProblem DynamicTrackingProcessor::pnp_detection;
     PnPProblem DynamicTrackingProcessor::pnp_detection_est;
     bool DynamicTrackingProcessor::mbFastMatch;
-    ConcurrentMap<int, DynamicObjectMap*> DynamicTrackingProcessor::MapDynaObject;
 
     void DynamicTrackingProcessor::Init() {
         // Robust Matcher parameters
@@ -61,6 +59,8 @@ namespace SemanticSLAM {
         pUser->mnUsed++;
         auto vecObjectTrackingRes = pUser->mapObjectTrackingResult.Get();
         cv::Mat _K = pUser->GetCameraMatrix();
+        cv::Mat Pcw = pUser->GetPose();
+        //pUser->mpKalmanFilter->Predict(Pcw);
         pUser->mnUsed--;
         cv::Mat K;
         _K.convertTo(K, CV_64FC1);
@@ -68,14 +68,12 @@ namespace SemanticSLAM {
         for (auto iter = vecObjectTrackingRes.begin(), iend = vecObjectTrackingRes.end(); iter != iend; iter++) {
             auto pTrackRes = iter->second;
             if(pTrackRes->mState == EdgeSLAM::ObjectTrackingState::Success)
-                POOL->EnqueueJob(DynamicTrackingProcessor::ObjectTracking2, SLAM, pTrackRes, frame, img, id, K);
+                POOL->EnqueueJob(DynamicTrackingProcessor::ObjectTracking2, SLAM, pTrackRes, frame, img, id, Pcw, K);
             //ObjectTracking(SLAM, mapName, pTrackRes, img, id, K)
         }
     }
 
-    void DynamicTrackingProcessor::UpdateKalmanFilter(int objID, int nPnP, cv::Mat _Pcw, cv::Mat _Pco, cv::Mat& Pwo) {
-        
-        auto DynaObjMap = MapDynaObject.Get(objID);
+    void DynamicTrackingProcessor::UpdateKalmanFilter(EdgeSLAM::ObjectNode* pObject, int nPnP, cv::Mat _Pcw, cv::Mat& _Pco, cv::Mat& Pwo) {
 
         cv::Mat Pcw, Pco;
         _Pcw.convertTo(Pcw, CV_64FC1);
@@ -96,30 +94,37 @@ namespace SemanticSLAM {
         if (nPnP >= 15)
         {
             // fill the measurements vector
-            DynaObjMap->mpKalmanFilter->fillMeasurements(Rwo, two);
+
+            pObject->mpKalmanFilter->fillMeasurements(two, Rwo);
         }
 
-        DynaObjMap->mpKalmanFilter->updateKalmanFilter(two, Rwo);
+        pObject->mpKalmanFilter->updateKalmanFilter(two, Rwo);
+        //객체->슬램 좌표계
         Pwo = cv::Mat::eye(4, 4, CV_64FC1);
         Rwo.copyTo(Pwo.rowRange(0, 3).colRange(0, 3));
         two.copyTo(Pwo.rowRange(0, 3).col(3));
         Pwo.convertTo(Pwo, CV_32FC1);
 
-        Rco = Rcw * Rwo;
+        //객체->카메라 좌표계
+        //Pcw*Pwo
+        _Pco = _Pcw * Pwo;
+        /*Rco = Rcw * Rwo;
         tco = Rcw * two + tcw;
         _Pco = cv::Mat::eye(4, 4, CV_64FC1);
         Rwo.copyTo(_Pco.rowRange(0, 3).colRange(0, 3));
-        two.copyTo(_Pco.rowRange(0, 3).col(3));
+        two.copyTo(_Pco.rowRange(0, 3).col(3));*/
         _Pco.convertTo(_Pco, CV_32FC1);
+        pObject->SetWorldPose(Pwo);
     }
 
-    int DynamicTrackingProcessor::ObjectTracking2(EdgeSLAM::SLAM* SLAM, EdgeSLAM::ObjectTrackingResult* pTrackRes, EdgeSLAM::Frame* frame, const cv::Mat& newframe, int fid, const cv::Mat& K) {
+    int DynamicTrackingProcessor::ObjectTracking2(EdgeSLAM::SLAM* SLAM, EdgeSLAM::ObjectTrackingResult* pTrackRes, EdgeSLAM::Frame* frame, const cv::Mat& newframe, int fid, const cv::Mat& Pcw, const cv::Mat& K) {
         auto pTrackFrame = pTrackRes->mpLastFrame;
         auto pObject = pTrackRes->mpObject;
         //일단 옵티컬 플로우로 테스트부터
         
-        auto DynaObjMap = MapDynaObject.Get(pObject->mnId);
-        cv::Mat P = pTrackRes->Pose.clone(); //오브젝트 좌표계에서 카메라 포즈임
+        //cv::Mat Pco = pTrackRes->Pose.clone(); //오브젝트 좌표계에서 카메라 포즈임
+        cv::Mat Pwo = pObject->GetWorldPose();
+        cv::Mat Pco = Pcw * Pwo;
 
         int win_size = 10;
         std::vector<cv::Point2f> cornersB;
@@ -174,9 +179,10 @@ namespace SemanticSLAM {
             sFound.insert(pMPi);
         }
         /*{
+            cv::Mat Pwo = DynaObjMap->GetPose();
             std::set<EdgeSLAM::MapPoint*> sFound;
             std::vector<std::pair<int, int>> matches;
-            int nAdditional = ObjectSearchPoints::SearchObjectMapByProjection(matches, frame, pTrackFrame->mvpMapPoints, sFound, P, pObject->GetOrigin(), 10, 100, false);
+            int nAdditional = ObjectSearchPoints::SearchObjectMapByProjection(matches, frame, pTrackFrame->mvpMapPoints, sFound, Pcw, Pwo, pObject->GetOrigin(), 10, 100, false);
             std::cout << "match test = " << nGood << " " << nAdditional << std::endl;
         }*/
 
@@ -194,22 +200,22 @@ namespace SemanticSLAM {
             
             std::vector<cv::Point2f> list_points2d_inliers;
 
-            cv::Mat R = P.rowRange(0, 3).colRange(0, 3);
-            cv::Mat t = P.rowRange(0, 3).col(3);
+            cv::Mat Rco = Pco.rowRange(0, 3).colRange(0, 3);
+            cv::Mat tco = Pco.rowRange(0, 3).col(3);
             cv::Mat rvec;// = cv::Mat::zeros(3, 1, CV_64FC1);
             cv::Mat tvec;// = cv::Mat::zeros(3, 1, CV_64FC1);
-            cv::Rodrigues(R, rvec);
+            cv::Rodrigues(Rco, rvec);
             rvec.convertTo(rvec, CV_64FC1);
-            t.convertTo(tvec, CV_64FC1);
+            tco.convertTo(tvec, CV_64FC1);
 
             pnp_detection.estimatePoseRANSAC(objectPoints, imagePoints,
                 K, rvec, tvec, pnpMethod, inliers_idx,
                 iterationsCount, reprojectionError, confidence, true);
 
-            cv::Rodrigues(rvec, R);
-            R.copyTo(P.rowRange(0, 3).colRange(0, 3));
-            tvec.copyTo(P.rowRange(0, 3).col(3));
-            P.convertTo(P, CV_32FC1);
+            cv::Rodrigues(rvec, Rco);
+            Rco.copyTo(Pco.rowRange(0, 3).colRange(0, 3));
+            tvec.copyTo(Pco.rowRange(0, 3).col(3));
+            Pco.convertTo(Pco, CV_32FC1);
 
             //프로젝션 매칭
             Plane* Floor = nullptr;
@@ -219,7 +225,7 @@ namespace SemanticSLAM {
             }
             EdgeSLAM::ObjectLocalMap* LocalObjectMap = new EdgeSLAM::ObjectLocalMap(mapPoints);
             std::vector<std::pair<int, int>> matches;
-            int nAdditional = ObjectSearchPoints::SearchObjectMapByProjection(matches, frame, LocalObjectMap->mvpLocalMapPoints, sFound, P, pObject->GetOrigin(), 10, 100, false);
+            int nAdditional = ObjectSearchPoints::SearchObjectMapByProjection(matches, frame, LocalObjectMap->mvpLocalMapPoints, sFound, Pco, pObject->GetOrigin(), 10, 100, false);
             //최적화
             for (int i = 0, N = matches.size(); i < N; i++) {
                 int idx1 = matches[i].first;
@@ -244,15 +250,14 @@ namespace SemanticSLAM {
             }
             
             std::vector<bool> outliers(imagePoints.size(), false);
-            nRes = ObjectOptimizer::ObjectPoseOptimization(imagePoints, objectPoints, outliers, P, frame->fx, frame->fy, frame->cx, frame->cy);
+            nRes = ObjectOptimizer::ObjectPoseOptimization(imagePoints, objectPoints, outliers, Pco, frame->fx, frame->fy, frame->cx, frame->cy);
             //std::cout << "Local Map Test = " << nAdditional <<" "<< imagePoints.size()<<"=" << " " << nRes << " ==" << LocalObjectMap->mvpLocalBoxes.size() << " " << LocalObjectMap->mvpLocalMapPoints.size() << std::endl;
 
             //nRes = inliers_idx.rows;
             if (nRes > 15) {
-                pTrackRes->Pose = P.clone();
+                pTrackRes->Pose = Pco.clone();
                 pTrackRes->mState = EdgeSLAM::ObjectTrackingState::Success;
                 pTrackRes->mnLastSuccessFrameId = fid;
-                pTrackRes->Pose = P.clone();
                 auto pTrackFrame = pTrackRes->mpLastFrame;
                 pTrackFrame->mvImagePoints.clear();
                 pTrackFrame->mvpMapPoints.clear();
@@ -291,8 +296,6 @@ namespace SemanticSLAM {
 
         int nBoxMatchThresh = 5;
         int nSuccessTracking = 15;
-
-        auto DynaObjMap = MapDynaObject.Get(pObject->mnId);
 
         auto pFrame = pNewBox->mpF;
         if (!pFrame)
@@ -563,6 +566,50 @@ namespace SemanticSLAM {
             cv::circle(image, point_2d, radius, color, -1, lineType);
         }
     }
+
+    cv::Mat ReprojectPoints(const cv::Mat& R, const cv::Mat& t, const cv::Mat& K, const cv::Mat& X) {
+        cv::Mat porj = R* X + t;
+    }
+
+    void DynamicTrackingProcessor::drawBoundingBox(cv::Mat& img, const cv::Mat& Pco, const cv::Mat& K, float radx, float rady, float radz) {
+        cv::Mat R = Pco.rowRange(0, 3).colRange(0, 3);
+        cv::Mat t = Pco.rowRange(0, 3).col(3);
+
+        std::vector<cv::Point2f> points;
+        /*points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f( radius, -radius, -radius)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f(-radius, -radius, -radius)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f( radius,  radius, -radius)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f(-radius,  radius, -radius)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f( radius, -radius,  radius)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f(-radius, -radius,  radius)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f( radius,  radius,  radius)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f(-radius,  radius,  radius)), K, R, t));*/
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f( radx, -rady, -radz)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f(-radx, -rady, -radz)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f( radx,  rady, -radz)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f(-radx,  rady, -radz)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f( radx, -rady,  radz)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f(-radx, -rady,  radz)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f( radx,  rady,  radz)), K, R, t));
+        points.push_back(Utils::ProjectPoint(cv::Mat(cv::Point3f(-radx,  rady,  radz)), K, R, t));
+
+        cv::Scalar color(255, 255, 255);
+        cv::line(img, points[0], points[1], color, 2);
+        cv::line(img, points[0], points[2], color, 2);
+        cv::line(img, points[3], points[1], color, 2);
+        cv::line(img, points[3], points[2], color, 2);
+
+        cv::line(img, points[4], points[5], color, 2);
+        cv::line(img, points[4], points[6], color, 2);
+        cv::line(img, points[7], points[5], color, 2);
+        cv::line(img, points[7], points[6], color, 2);
+
+        cv::line(img, points[0], points[4], color, 2);
+        cv::line(img, points[1], points[5], color, 2);
+        cv::line(img, points[2], points[6], color, 2);
+        cv::line(img, points[3], points[7], color, 2);
+    }
+
     void DynamicTrackingProcessor::draw3DCoordinateAxes(cv::Mat image, const std::vector<cv::Point2f>& list_points2d) {
         cv::Scalar red(0, 0, 255);
         cv::Scalar green(0, 255, 0);

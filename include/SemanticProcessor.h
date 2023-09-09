@@ -26,7 +26,11 @@ namespace SemanticSLAM {
 		HANDBAG = 27,
 		SUITCASE = 29,
 		LAPTOP = 64,
-		KEYBOARD = 67
+		KEYBOARD = 67,
+		SKATEBOARD = 37,
+		SNOWBOARD =32,
+		BYCYCLE=2,
+		REMOTE=66
 	};
 
 	enum class StructureLabel {

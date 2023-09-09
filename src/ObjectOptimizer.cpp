@@ -381,7 +381,7 @@ namespace SemanticSLAM {
 		vpEdgesMono.reserve(N);
 		vnIndexEdgeMono.reserve(N);
 
-		float th = 10.0;//5.991;
+		float th = 5.991;
 		float deltaMono = sqrt(th);
 
 		float Na = 0;

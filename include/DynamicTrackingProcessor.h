@@ -30,18 +30,18 @@ namespace SemanticSLAM {
 	public:
 		static RobustMatcher rmatcher;
 		static PnPProblem pnp_detection, pnp_detection_est;
-		static ConcurrentMap<int, DynamicObjectMap*> MapDynaObject;
 	public:
 		static void Init();
-		static void UpdateKalmanFilter(int objID, int nPnP, cv::Mat _Pcw, cv::Mat _Pco, cv::Mat& Pwo);
+		static void UpdateKalmanFilter(EdgeSLAM::ObjectNode* pObject, int nPnP, cv::Mat _Pcw, cv::Mat& _Pco, cv::Mat& Pwo);
 		static void ObjectTracking(ThreadPool::ThreadPool* POOL, EdgeSLAM::SLAM* SLAM, std::string user, EdgeSLAM::Frame* frame, const cv::Mat& img, int id);
 		static int ObjectRelocalization(EdgeSLAM::ObjectBoundingBox* pNewBox, EdgeSLAM::ObjectNode* pObject, EdgeSLAM::ObjectTrackingResult* pTrackRes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P);
+		static void drawBoundingBox(cv::Mat& imgage, const cv::Mat& Pco, const cv::Mat& K, float radx, float rady, float radz);
 	private:
 		//Parameter
 		static bool mbFastMatch;
 	private:
 		//tracking
-		static int ObjectTracking2(EdgeSLAM::SLAM* SLAM, EdgeSLAM::ObjectTrackingResult* pTrackRes, EdgeSLAM::Frame* frame, const cv::Mat& newframe, int fid, const cv::Mat& K);
+		static int ObjectTracking2(EdgeSLAM::SLAM* SLAM, EdgeSLAM::ObjectTrackingResult* pTrackRes, EdgeSLAM::Frame* frame, const cv::Mat& newframe, int fid, const cv::Mat& Pcw, const cv::Mat& K);
 
 	private:
 		//utils

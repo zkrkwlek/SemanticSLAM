@@ -266,6 +266,148 @@ namespace SemanticSLAM {
 		return nmatches;
 	}
 
+	int ObjectSearchPoints::SearchObjectMapByProjection(std::vector<std::pair<int, int>>& matches, EdgeSLAM::Frame* pF, const std::vector<EdgeSLAM::MapPoint*>& vpLocalMapPoints, const std::set<EdgeSLAM::MapPoint*>& sAlreadyFound, cv::Mat Pcw, cv::Mat Pwo, cv::Mat origin, const float th, const int ORBdist, bool bCheckOri) {
+		std::vector<bool> bMatches = std::vector<bool>(pF->N, false);
+		cv::Mat Rcw = Pcw.rowRange(0, 3).colRange(0, 3);
+		cv::Mat tcw = Pcw.rowRange(0, 3).col(3);
+		cv::Mat Ow = -Rcw.t() * tcw;
+
+		cv::Mat Rwo = Pwo.rowRange(0, 3).colRange(0, 3);
+		cv::Mat two = Pwo.rowRange(0, 3).col(3);
+
+		cv::Mat Pco = Pcw * Pwo;
+		cv::Mat Rco = Pco.rowRange(0, 3).colRange(0, 3);
+		cv::Mat tco = Pco.rowRange(0, 3).col(3);
+
+		std::vector<int> rotHist[HISTO_LENGTH];
+		const float factor = 1.0f / HISTO_LENGTH;
+
+		float fx = pF->fx;
+		float fy = pF->fy;
+		float cx = pF->cx;
+		float cy = pF->cy;
+		float nMinX = pF->mnMinX;
+		float nMinY = pF->mnMinY;
+		float nMaxX = pF->mnMaxX;
+		float nMaxY = pF->mnMaxY;
+
+		int nmatches = 0;
+		for (size_t i = 0, iend = vpLocalMapPoints.size(); i < iend; i++)
+		{
+			auto pMP = vpLocalMapPoints[i];
+
+			if (pMP)
+			{
+				if (!pMP->isBad() && !sAlreadyFound.count(pMP))
+				{
+					//Project
+					cv::Mat x3Do = pMP->GetWorldPos() - origin;
+					
+					cv::Mat x3Dc = Rco * x3Do + tco;
+
+					const float xc = x3Dc.at<float>(0);
+					const float yc = x3Dc.at<float>(1);
+					const float invzc = 1.0 / x3Dc.at<float>(2);
+
+					const float u = fx * xc * invzc + cx;
+					const float v = fy * yc * invzc + cy;
+
+					if (u<nMinX || u>nMaxX)
+						continue;
+					if (v<nMinY || v>nMaxY)
+						continue;
+
+					// Compute predicted scale level
+					//cv::Mat PO = x3Dw - Ow;
+					float dist3D = cv::norm(x3Dc);
+
+					const float maxDistance = pMP->GetMaxDistanceInvariance();
+					const float minDistance = pMP->GetMinDistanceInvariance();
+
+					// Depth must be inside the scale pyramid of the image
+					if (dist3D<minDistance || dist3D>maxDistance)
+						continue;
+
+					int nPredictedLevel = pMP->PredictScale(dist3D, pF);
+
+					// Search in a window
+					const float radius = th * pF->mvScaleFactors[nPredictedLevel];
+
+					const auto vIndices2 = pF->GetFeaturesInArea(u, v, radius, nPredictedLevel - 1, nPredictedLevel + 1);
+
+					if (vIndices2.empty())
+						continue;
+
+					const cv::Mat dMP = pMP->GetDescriptor();
+
+					int bestDist = 256;
+					int bestIdx2 = -1;
+
+					for (auto vit = vIndices2.begin(); vit != vIndices2.end(); vit++)
+					{
+						const size_t i2 = *vit;
+						int newIDX = i2;
+
+						if (bMatches[newIDX])
+							continue;
+
+						const cv::Mat& d = pF->mDescriptors.row(newIDX);
+
+						const int dist = (int)Matcher->DescriptorDistance(dMP, d);
+
+						if (dist < bestDist)
+						{
+							bestDist = dist;
+							bestIdx2 = newIDX;
+						}
+					}
+
+					if (bestDist <= ORBdist)
+					{
+						bMatches[bestIdx2] = true;
+						matches.push_back(std::make_pair((int)i, (int)bestIdx2));
+						nmatches++;
+
+						/*if (bCheckOri)
+						{
+							float rot = pKeyBox->mvKeys[i].angle - pF->mvKeysUn[bestIdx2].angle;
+							if (rot < 0.0)
+								rot += 360.0f;
+							int bin = round(rot * factor);
+							if (bin == HISTO_LENGTH)
+								bin = 0;
+							assert(bin >= 0 && bin < HISTO_LENGTH);
+							rotHist[bin].push_back(bestIdx2);
+						}*/
+					}
+
+				}
+			}
+		}
+
+		if (bCheckOri)
+		{
+			int ind1 = -1;
+			int ind2 = -1;
+			int ind3 = -1;
+
+			ComputeThreeMaxima(rotHist, HISTO_LENGTH, ind1, ind2, ind3);
+
+			for (int i = 0; i < HISTO_LENGTH; i++)
+			{
+				if (i != ind1 && i != ind2 && i != ind3)
+				{
+					for (size_t j = 0, jend = rotHist[i].size(); j < jend; j++)
+					{
+						pF->mvpMapPoints[rotHist[i][j]] = nullptr;
+						nmatches--;
+					}
+				}
+			}
+		}
+		return nmatches;
+	}
+	
 	int ObjectSearchPoints::SearchFrameByProjection(EdgeSLAM::Frame* pF, EdgeSLAM::ObjectBoundingBox* pKeyBox, const std::set<EdgeSLAM::MapPoint*>& sAlreadyFound, cv::Mat P, const float th, const int ORBdist, bool bCheckOri)
 	{
 		cv::Mat Rcw = P.rowRange(0, 3).colRange(0, 3);

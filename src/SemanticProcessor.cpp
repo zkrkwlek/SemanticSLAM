@@ -20,7 +20,6 @@
 #include <SLAM.h>
 
 #include <DynamicTrackingProcessor.h>
-#include <DynamicObjectMap.h>
 
 namespace SemanticSLAM {
 	SemanticProcessor::SemanticProcessor() {}
@@ -82,9 +81,13 @@ namespace SemanticSLAM {
 		}
 
 		ObjectWhiteList.Update((int)MovingObjectLabel::CHAIR);
+		ObjectWhiteList.Update((int)MovingObjectLabel::SKATEBOARD);
 		//ObjectWhiteList.Update((int)MovingObjectLabel::PERSON);
 		ObjectCandidateList.Update((int)MovingObjectLabel::SUITCASE, (int)MovingObjectLabel::CHAIR);
 		ObjectCandidateList.Update((int)MovingObjectLabel::HANDBAG, (int)MovingObjectLabel::CHAIR);
+		ObjectCandidateList.Update((int)MovingObjectLabel::SNOWBOARD, (int)MovingObjectLabel::SKATEBOARD);
+		ObjectCandidateList.Update((int)MovingObjectLabel::BYCYCLE, (int)MovingObjectLabel::SKATEBOARD);
+		ObjectCandidateList.Update((int)MovingObjectLabel::REMOTE, (int)MovingObjectLabel::SKATEBOARD);
 		LabelWhiteList.Update((int)StructureLabel::CHAIR);
 
 		vecStrSemanticLabels = Utils::Split(strLabel, ",");
@@ -1365,11 +1368,11 @@ namespace SemanticSLAM {
 			cv::Point2f pt(pNewBox->rect.x+pNewBox->rect.width/2, pNewBox->rect.y + 20);
 			
 			//cv::putText(img, vecStrObjectLabels[pNewBox->label-1], pt, 2, 1.2, cv::Scalar(255, 255, 255));
-			if (pNewBox->label != (int)MovingObjectLabel::CHAIR && pNewBox->label != (int)MovingObjectLabel::PERSON){
+			/*if (pNewBox->label != (int)MovingObjectLabel::CHAIR && pNewBox->label != (int)MovingObjectLabel::PERSON){
 				std::cout << "Not chair =" << vecStrObjectLabels[pNewBox->label-1] <<" = "<<pNewBox->label <<","<< mapObjectCount[pNewBox->label]<< std::endl;
-				cv::rectangle(img, pNewBox->rect, cv::Scalar(255, 255, 0), 2);
+				cv::rectangle(img, pNewBox->rect, cv::Scalar(255, 255, 0), 2)w;
 				continue;
-			}
+			}*/
 			std::chrono::high_resolution_clock::time_point astart = std::chrono::high_resolution_clock::now();
 			
 			
@@ -1938,9 +1941,11 @@ namespace SemanticSLAM {
 				int label = (int)data.at<float>(j, 0)+1;
 				bool bC1 = ObjectWhiteList.Count(label);
 				bool bC2 = ObjectCandidateList.Count(label);
-				
-				if (!bC1 && !bC2)
+				if (!bC1 && !bC2){
+					if (label > 1)
+						std::cout << vecStrObjectLabels[label - 1] << " " << label << std::endl;
 					continue;
+				}
 				if(!bC1 && bC2){
 					label = ObjectCandidateList.Get(label);
 				}
@@ -1953,7 +1958,7 @@ namespace SemanticSLAM {
 				auto pBBox = new EdgeSLAM::ObjectBoundingBox(pKF, label, conf, left, right);
 				spBBoxes.insert(pBBox);
 				mapObjectCount[pBBox->label]++;
-
+				
 			}
 
 			//merge
@@ -2053,23 +2058,28 @@ namespace SemanticSLAM {
 	//트래킹이 안되면 오브젝트가 움직인다는 뜻
 	//트래킹이 되면 오브젝트가 움직이지 않는 상태 - 오브젝트 매핑을 수행함.
 	void SemanticProcessor::CheckDynamicObject(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
-
+		
 		auto pUser = SLAM->GetUser(user);
 		if (!pUser)
 			return;
 
-		if (!pUser->KeyFrames.Count(id))
+		if (!pUser->KeyFrames.Count(id)){
+			std::cout << "11111" << std::endl;
 			return;
+		}
 		auto pKF = pUser->KeyFrames.Get(id);
 		/*if (!pKF)
 			return;*/
 		std::set<EdgeSLAM::ObjectBoundingBox*> spNewBBs;
 		if (!GraphKeyFrameObjectBB.Count(pKF)) {
+			std::cout << "222222" << std::endl;
 			return;
 		}
 		spNewBBs = GraphKeyFrameObjectBB.Get(pKF);
-		if (spNewBBs.size() == 0)
+		if (spNewBBs.size() == 0){
+			std::cout << "3333333" << std::endl;
 			return;
+		}
 		////키프레임 박스 테스트
 		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(20);
 		std::set<EdgeSLAM::ObjectBoundingBox*> setNeighObjectBBs;
@@ -2082,8 +2092,7 @@ namespace SemanticSLAM {
 				setTempBBs = GraphKeyFrameObjectBB.Get(pKFi);
 				for (auto jter = setTempBBs.begin(), jend = setTempBBs.end(); jter != jend; jter++) {
 					auto pContent = *jter;
-					if (pContent->label != (int)MovingObjectLabel::CHAIR)
-						continue;
+					
 					if (!setNeighObjectBBs.count(pContent)) {
 						setNeighObjectBBs.insert(pContent);
 						/*if (pContent->mpNode)
@@ -2113,8 +2122,10 @@ namespace SemanticSLAM {
 				spNodes.insert(pObj);
 			}
 		}
-		if (setNeighObjectBBs.size() == 0)
+		if (setNeighObjectBBs.size() == 0){
+			std::cout << "4444444   "<< vpLocalKFs.size() << std::endl;
 			return;
+		}
 		pUser->mnUsed++;
 		int w = pUser->mpCamera->mnWidth;
 		int h = pUser->mpCamera->mnHeight;
@@ -2329,8 +2340,7 @@ namespace SemanticSLAM {
 		//처리
 		for (auto oter = spNewBBs.begin(), oend = spNewBBs.end(); oter != oend; oter++) {
 			auto pBBox = *oter;
-			if (pBBox->label != (int)MovingObjectLabel::CHAIR)
-				continue;
+			
 			auto pNewObjectMap = new EdgeSLAM::ObjectNode();
 			pNewObjectMap->mspBBs.Update(pBBox);
 			for (auto bter = setNeighObjectBBs.begin(), bend = setNeighObjectBBs.end(); bter != bend; bter++) {
@@ -2351,9 +2361,6 @@ namespace SemanticSLAM {
 			SLAM->GlobalObjectMap.Update(pNewObjectMap);
 			//ObjectOptimizer::ObjectMapAdjustment(pNewObjectMap);
 			pBBox->UpdateConnections();
-
-			DynamicObjectMap* pTempMap = new DynamicObjectMap();
-			DynamicTrackingProcessor::MapDynaObject.Update(pNewObjectMap->mnId, pTempMap);
 
 		}
 		for (auto kter = vpLocalKFs.begin(), kend = vpLocalKFs.end(); kter != kend; kter++) {
