@@ -1375,8 +1375,6 @@ namespace SemanticSLAM {
 			}*/
 			std::chrono::high_resolution_clock::time_point astart = std::chrono::high_resolution_clock::now();
 			
-			
-			
 			/*for (auto iter = setNeighObjectBBs.begin(), iend = setNeighObjectBBs.end(); iter != iend; iter++) {
 				auto pNeighBox = *iter;
 				DynamicTrackingProcessor::MatchTest(pNewBox, pNeighBox, img.clone(),cv::Mat(),k);
@@ -2368,6 +2366,52 @@ namespace SemanticSLAM {
 			GraphKeyFrameObject.Update(pKFi, spNodes);
 		}
 		
+	}
+
+	void SemanticProcessor::ObjectMapUpdateWithPlane(EdgeSLAM::SLAM* SLAM, EdgeSLAM::Map* MAP) {
+		std::vector<EdgeSLAM::KeyFrame*> vpKFs = MAP->GetAllKeyFrames();
+		std::set<EdgeSLAM::ObjectNode*> spObjNodes;
+		for (auto iter = vpKFs.begin(), iend = vpKFs.end(); iter != iend; iter++) {
+			auto pKFi = *iter;
+			std::set<EdgeSLAM::ObjectNode*> tempNodes;
+			if (GraphKeyFrameObject.Count(pKFi)) {
+				tempNodes = GraphKeyFrameObject.Get(pKFi);
+				for (auto jter = tempNodes.begin(), jend = tempNodes.end(); jter != jend; jter++) {
+					auto pNode = *jter;
+					if (!spObjNodes.count(pNode)) {
+						spObjNodes.insert(pNode);
+					}
+				}//jter
+			}//iter
+		}
+
+		Plane* Floor = nullptr;
+		if (PlaneEstimator::GlobalFloor)
+		{
+			Floor = PlaneEstimator::GlobalFloor;
+		}
+		else
+			return;
+		std::cout << "start obj update " << std::endl;
+		//일단 박스크기와 오리진만 갱신하는 걸로
+		//추후 바운딩 박스 안의 맵포인트들도 변경하고 해야 함
+		for (auto oter = spObjNodes.begin(), oend = spObjNodes.end(); oter != oend; oter++) {
+			auto pObj = *oter;
+			auto vecMPs = pObj->mspMPs.ConvertVector();
+			std::vector<EdgeSLAM::MapPoint*> newVecMPs;
+			for (int i = 0, iend = vecMPs.size(); i < iend; i++) {
+				auto pMPi = vecMPs[i];
+				if (!pMPi || pMPi->isBad())
+					continue;
+				float dist = Floor->Distacne(pMPi->GetWorldPos());
+				if (abs(dist) < 0.1)
+					continue;
+				newVecMPs.push_back(pMPi);
+			}
+			pObj->UpdateOrigin(newVecMPs);
+			std::cout << newVecMPs.size() <<" "<<vecMPs.size()<< std::endl;
+		}
+		std::cout << "end" << std::endl;
 	}
 
 	//void SemanticProcessor::ObjectMapGeneration(EdgeSLAM::SLAM* SLAM, std::string user, int id) {

@@ -51,6 +51,7 @@ namespace SemanticSLAM {
         //double dt = 0.125;           // time between measurements (1/FPS)
         //initKalmanFilter(KFilter, nStates, nMeasurements, nInputs, dt);
     }
+
     void DynamicTrackingProcessor::ObjectTracking(ThreadPool::ThreadPool* POOL, EdgeSLAM::SLAM* SLAM, std::string user, EdgeSLAM::Frame* frame, const cv::Mat& _img, int id) {
         auto pUser = SLAM->GetUser(user);
         if (!pUser)
@@ -300,7 +301,6 @@ namespace SemanticSLAM {
         auto pFrame = pNewBox->mpF;
         if (!pFrame)
             std::cout << "frame is not exist??????" << std::endl;
-
 
         int nGood = 0;
         std::set<EdgeSLAM::MapPoint*> sFound;

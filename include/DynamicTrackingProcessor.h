@@ -22,7 +22,6 @@ namespace EdgeSLAM {
 	class ObjectTrackingResult;
 	class ObjectTrackingFrame;
 	class Frame;
-	
 }
 namespace SemanticSLAM {
 	class DynamicObjectMap;

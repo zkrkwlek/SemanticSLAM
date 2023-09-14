@@ -16,7 +16,7 @@ namespace SemanticSLAM {
 	Plane* PlaneEstimator::GlobalFloor = new Plane();
 	Plane* PlaneEstimator::GlobalCeil = new Plane();
 
-	Plane::Plane():status(PlaneStatus::NOT_INITIALIZED), count(0), nScore(0), mnID(++PlaneEstimator::nPlaneID) {
+	Plane::Plane():Node(),status(PlaneStatus::NOT_INITIALIZED), count(0), nScore(0), mnID(++PlaneEstimator::nPlaneID) {
 		
 	}
 	Plane::~Plane(){

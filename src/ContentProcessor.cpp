@@ -14,8 +14,8 @@ namespace SemanticSLAM {
 	ConcurrentMap<EdgeSLAM::KeyFrame*, std::map<int, std::string>> ContentProcessor::AnchorIDs;
 
 	//임시로 마커 아이디에 다른 타입이 들어감. 테스트 다시 해야 함. 드로우용 컨텐츠 생성하기 위해서
-	Content::Content(){}
-	Content::Content(const cv::Mat& _X, std::string _src, int _modelID, long long ts):mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), mbMoving(false), mpPath(nullptr)
+	Content::Content():Node(){}
+	Content::Content(const cv::Mat& _X, std::string _src, int _modelID, long long ts):Node(),mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), mbMoving(false), mpPath(nullptr)
 	,mnLastUpdatedTime(ts)
 	{
 		float len = _X.at<float>(0);

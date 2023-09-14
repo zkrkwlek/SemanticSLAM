@@ -67,6 +67,7 @@ namespace SemanticSLAM {
 		static void CreateBoundingBox(EdgeSLAM::SLAM* SLAM, std::string user, int id, EdgeSLAM::KeyFrame* pTargetKF, cv::Mat labeled);
 
 		static void Init(EdgeSLAM::SLAM* _SLAM);
+		static void ObjectMapUpdateWithPlane(EdgeSLAM::SLAM* SLAM, EdgeSLAM::Map* MAP);
 		static void DenseOpticalFlow(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void MultiViewStereo(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void ObjectUpdate(EdgeSLAM::SLAM* SLAM, std::string user, int id);

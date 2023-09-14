@@ -10,6 +10,7 @@
 #include <ConcurrentSet.h>
 #include <KeyFrame.h>
 #include <MapPoint.h>
+#include <Node.h>
 
 namespace SemanticSLAM {
 	class Plane;
@@ -63,7 +64,7 @@ namespace SemanticSLAM {
 		std::atomic<int> nData;
 	};
 
-	class Plane {
+	class Plane : public EdgeSLAM::Node{
 	public:
 		Plane();
 		virtual ~Plane();

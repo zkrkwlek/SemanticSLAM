@@ -9,6 +9,7 @@
 #include <ConcurrentMap.h>
 #include <ConcurrentSet.h>
 #include <KeyFrame.h>
+#include <Node.h>
 
 namespace SemanticSLAM {
 	class Path {
@@ -51,7 +52,7 @@ namespace SemanticSLAM {
 			bMove = false;
 		}
 	};
-	class Content {
+	class Content : public EdgeSLAM::Node{
 	public:
 		Content();
 		Content(const cv::Mat& _X, std::string _src, int _modelID, long long ts);
