@@ -5,6 +5,7 @@
 #include <Camera.h>
 #include <SemanticProcessor.h>
 #include <SemanticLabel.h>
+#include <LabelInfo.h>
 
 namespace SemanticSLAM {
 
@@ -387,9 +388,10 @@ namespace SemanticSLAM {
 			//pUser->mnUsed--;
 			return;
 		}
-		pUser->mnDebugPlane++;
 		auto pKF = pUser->KeyFrames.Get(id);
-
+		if (!pKF)
+			return;
+		pUser->mnDebugPlane++;
 		//Å°ÇÁ·¹ÀÓÀÇ ÀÚ¼¼ È¹µæ
 		cv::Mat R = pKF->GetRotation();
 		cv::Mat t = pKF->GetTranslation();
@@ -459,9 +461,9 @@ namespace SemanticSLAM {
 			auto pMPi = *iter;// ->first;
 			if (!pMPi || pMPi->isBad())
 				continue;
-			if (!SemanticProcessor::SemanticLabels.Count(pMPi->mnId))
+			if (!pMPi->mpSemanticLabel)
 				continue;
-			auto pLabel = SemanticProcessor::SemanticLabels.Get(pMPi->mnId);
+			auto pLabel = pMPi->mpSemanticLabel;
 			
 			if (pLabel->LabelCount.Count((int)StructureLabel::FLOOR) && pLabel->LabelCount.Get((int)StructureLabel::FLOOR) > THRESH) {
 				FloorAllData->AddData(pMPi);

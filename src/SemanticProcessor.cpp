@@ -8,6 +8,7 @@
 #include <Frame.h>
 #include <MapPoint.h>
 #include <FeatureTracker.h>
+#include <LabelInfo.h>
 
 #include <SemanticLabel.h>
 #include <ObjectOptimizer.h>
@@ -35,8 +36,8 @@ namespace SemanticSLAM {
 
 	ConcurrentMap<int, std::vector<cv::Point2f>> SemanticProcessor::SuperPoints;
 	ConcurrentMap<int, cv::Mat> SemanticProcessor::SemanticLabelImage;
-	ConcurrentMap<int, ObjectLabel*> SemanticProcessor::ObjectLabels;
-	ConcurrentMap<int, SemanticLabel*> SemanticProcessor::SemanticLabels;
+	/*ConcurrentMap<int, ObjectLabel*> SemanticProcessor::ObjectLabels;
+	ConcurrentMap<int, SemanticLabel*> SemanticProcessor::SemanticLabels;*/
 	std::vector<std::string> SemanticProcessor::vecStrSemanticLabels;
 	std::vector<std::string> SemanticProcessor::vecStrObjectLabels;
 	std::vector<cv::Vec3b> SemanticProcessor::SemanticColors;
@@ -48,6 +49,7 @@ namespace SemanticSLAM {
 	//키프레임-오브젝트
 	//ConcurrentMap<EdgeSLAM::MapPoint*, std::set<EdgeSLAM::ObjectBoundingBox*>> EdgeSLAM::SLAM::GraphMapPointAndBoundingBox;
 
+	ConcurrentMap<EdgeSLAM::KeyFrame*, EdgeSLAM::ObjectBoundingBox*> SemanticProcessor::GraphKFAndPerson;
 	ConcurrentMap<EdgeSLAM::ObjectNode*, std::set<EdgeSLAM::KeyFrame*>> SemanticProcessor::GraphObjectKeyFrame;
 	ConcurrentMap<EdgeSLAM::KeyFrame*, std::set<EdgeSLAM::ObjectNode*>> SemanticProcessor::GraphKeyFrameObject;
 	ConcurrentMap<EdgeSLAM::KeyFrame*, std::set<EdgeSLAM::ObjectBoundingBox*>> SemanticProcessor::GraphKeyFrameObjectBB;
@@ -83,6 +85,7 @@ namespace SemanticSLAM {
 		ObjectWhiteList.Update((int)MovingObjectLabel::CHAIR);
 		ObjectWhiteList.Update((int)MovingObjectLabel::SKATEBOARD);
 		//ObjectWhiteList.Update((int)MovingObjectLabel::PERSON);
+
 		ObjectCandidateList.Update((int)MovingObjectLabel::SUITCASE, (int)MovingObjectLabel::CHAIR);
 		ObjectCandidateList.Update((int)MovingObjectLabel::HANDBAG, (int)MovingObjectLabel::CHAIR);
 		ObjectCandidateList.Update((int)MovingObjectLabel::SNOWBOARD, (int)MovingObjectLabel::SKATEBOARD);
@@ -180,29 +183,29 @@ namespace SemanticSLAM {
 		{
 			return;
 		}*/
-		pUser->mnDebugLabel++;
 		//pUser->mnUsed++;
 		auto pKF = pUser->KeyFrames.Get(id);
+		if (!pKF){
+			return;
+		}
+		pUser->mnDebugLabel++;
 		//cv::Mat encoded = pUser->ImageDatas.Get(id);
 		//cv::Mat img = cv::imdecode(encoded, cv::IMREAD_COLOR);
 
 		
 		//std::cout << "LabelMapPoint = " << spNewBBs.size() << std::endl;
-
+		std::cout << pKF->N << " " << pKF->mvpMapPoints.size() << std::endl;
 		for (int i = 0, iend = pKF->N; i < iend; i++) {
 			auto pMPi = pKF->mvpMapPoints.get(i);
 			if (!pMPi || pMPi->isBad())
 				continue;
 			auto pt = pKF->mvKeys[i].pt;
-			SemanticLabel* pLabel = nullptr;
-			if (!SemanticLabels.Count(pMPi->mnId)) {
-				pLabel = new SemanticLabel();
-				SemanticLabels.Update(pMPi->mnId, pLabel);
+			EdgeSLAM::SemanticLabel* pLabel = nullptr;
+			if (!pMPi->mpSemanticLabel) {
+				pMPi->mpSemanticLabel = new EdgeSLAM::SemanticLabel();
 			}
-			else {
-				pLabel = SemanticLabels.Get(pMPi->mnId);
-			}
-			
+			pLabel = pMPi->mpSemanticLabel;
+
 			int label = labeled.at<uchar>(pt) + 1;
 			int c = 0;
 			if (pLabel->LabelCount.Count(label))
@@ -212,13 +215,15 @@ namespace SemanticSLAM {
 			int n1 = 0;
 			int n2 = 0;
 			int n3 = 0;
+			int n4 = 0;
 			if (pLabel->LabelCount.Count((int)StructureLabel::FLOOR))
 				n1 = pLabel->LabelCount.Get((int)StructureLabel::FLOOR);
 			if (pLabel->LabelCount.Count((int)StructureLabel::WALL))
 				n2 = pLabel->LabelCount.Get((int)StructureLabel::WALL);
 			if (pLabel->LabelCount.Count((int)StructureLabel::CEIL))
 				n3 = pLabel->LabelCount.Get((int)StructureLabel::CEIL);
-
+			/*if (pLabel->LabelCount.Count((int)StructureLabel::PERSON))
+				n4 = pLabel->LabelCount.Get((int)StructureLabel::PERSON);*/
 			auto val = std::max(std::max(n1, n2), n3);
 
 			if (val == n1) {
@@ -233,9 +238,10 @@ namespace SemanticSLAM {
 			}
 			if (val == n3) {
 				pMPi->mnLabelID = (int)StructureLabel::CEIL;
-				//mapDatas[pMPi->mnId] = pMPi->GetWorldPos();
-				//labelDatas[pMPi->mnId] = cv::Mat::ones(1, 1, CV_8UC1)*(int)StructureLabel::CEIL;
 			}
+			/*if (val == n4) {
+				pMPi->mnLabelID = (int)StructureLabel::PERSON;
+			}*/
 
 			//cv::circle(img, pt, 3, SemanticColors[label], -1);
 		}
@@ -288,11 +294,11 @@ namespace SemanticSLAM {
 				continue;
 			if (label == (int)StructureLabel::BUILDING)
 				continue;
+			
 			LabelCountTest[label]++;
 
 			for (auto oter = spNewBBs.begin(), oend = spNewBBs.end(); oter != oend; oter++) {
 				auto pBBox = *oter;
-
 				if (!pBBox->rect.contains(pt))
 					continue;
 				
@@ -301,13 +307,18 @@ namespace SemanticSLAM {
 				/*if (label != 20)
 					continue;*/
 
+				size_t idx = pBBox->mvKeys.size();
 				auto pMP = pTargetKF->GetMapPoint(k);
 				if (!pMP || pMP->isBad()) {
 					pMP = nullptr;
 				}
+				/*else {
+					pMP->AddBoxObservation(pBBox, idx);
+				}*/
+
 				cv::Mat row = pTargetKF->mDescriptors.row(k);
 				pBBox->mvIDXs.push_back(k);
-				pBBox->mapIDXs[k] = pBBox->mvKeys.size();
+				pBBox->mapIDXs[k] = idx;
 				pBBox->mvKeys.push_back(pTargetKF->mvKeysUn[k]);
 				pBBox->desc.push_back(row.clone());
 				pBBox->AddMapPoint(pMP);
@@ -659,7 +670,7 @@ namespace SemanticSLAM {
 		for (int y = 0; y < h; y++) {
 			for (int x = 0; x < w; x++) {
 				int label = labeled.at<uchar>(y, x) + 1;
-				if(label == (int)StructureLabel::CHAIR || label ==(int)StructureLabel::EARTH || label == (int)StructureLabel::TABLE)
+				if(label == (int) StructureLabel::PERSON || label == (int)StructureLabel::CHAIR || label ==(int)StructureLabel::EARTH || label == (int)StructureLabel::TABLE)
 					segcolor2.at<cv::Vec3b>(y, x) = SemanticColors[label];
 			}
 		}
@@ -1940,8 +1951,8 @@ namespace SemanticSLAM {
 				bool bC1 = ObjectWhiteList.Count(label);
 				bool bC2 = ObjectCandidateList.Count(label);
 				if (!bC1 && !bC2){
-					if (label > 1)
-						std::cout << vecStrObjectLabels[label - 1] << " " << label << std::endl;
+					/*if (label > 1)
+						std::cout << vecStrObjectLabels[label - 1] << " " << label << std::endl;*/
 					continue;
 				}
 				if(!bC1 && bC2){
@@ -1957,6 +1968,28 @@ namespace SemanticSLAM {
 				spBBoxes.insert(pBBox);
 				mapObjectCount[pBBox->label]++;
 				
+				////사람이면 바로 여기서 맵포인트 체크하기
+				//if (label == (int)MovingObjectLabel::PERSON) {
+				//	for (int k = 0, kend = pKF->N; k < kend; k++) {
+				//		auto pt = pKF->mvKeys[k].pt;
+				//		if (!pBBox->rect.contains(pt))
+				//			continue;
+
+				//		auto pMP = pKF->GetMapPoint(k);
+				//		if (!pMP || pMP->isBad()) {
+				//			continue;
+				//		}
+				//		cv::Mat row = pKF->mDescriptors.row(k);
+				//		pBBox->AddMapPoint(pMP);
+				//		pMP->AddBoxObservation(pBBox, pBBox->mvIDXs.size());
+				//		pBBox->mvIDXs.push_back(k);
+				//		pBBox->mapIDXs[k] = pBBox->mvKeys.size();
+				//		pBBox->mvKeys.push_back(pKF->mvKeysUn[k]);
+				//		pBBox->desc.push_back(row.clone());
+				//	}
+				//	//std::cout << "PERSON TEST = " << pBBox->desc.rows << std::endl;
+				//	GraphKFAndPerson.Update(pKF, pBBox);
+				//}
 			}
 
 			//merge
@@ -2055,6 +2088,10 @@ namespace SemanticSLAM {
 	//슬램 좌표계에서 오브젝트와 트래킹
 	//트래킹이 안되면 오브젝트가 움직인다는 뜻
 	//트래킹이 되면 오브젝트가 움직이지 않는 상태 - 오브젝트 매핑을 수행함.
+
+	int nMapping = 0;
+	float totalTime2 = 0.0;
+
 	void SemanticProcessor::CheckDynamicObject(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		
 		auto pUser = SLAM->GetUser(user);
@@ -2078,6 +2115,8 @@ namespace SemanticSLAM {
 			std::cout << "3333333" << std::endl;
 			return;
 		}
+
+		std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
 		////키프레임 박스 테스트
 		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(20);
 		std::set<EdgeSLAM::ObjectBoundingBox*> setNeighObjectBBs;
@@ -2286,6 +2325,13 @@ namespace SemanticSLAM {
 		//인접한 키프레임으로부터 박수 집합 획득
 
 		//바운딩 박스로부터 오브젝트 맵 획득
+		
+		std::chrono::high_resolution_clock::time_point end = std::chrono::high_resolution_clock::now();
+		auto du_frame = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+		float t_frame = du_frame / 1000.0;
+		nMapping++;
+		totalTime2 += t_frame;
+		std::cout << "Object Mapping = " << t_frame / nMapping << std::endl;
 	}
 	 
 	void SemanticProcessor::MapPointCulling(EdgeSLAM::ObjectNode* map, unsigned long int nCurrentKFid)

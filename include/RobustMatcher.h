@@ -17,7 +17,7 @@
 class RobustMatcher {
 public:
     RobustMatcher() : detector_(), extractor_(), matcher_(),
-        ratio_(0.8f), training_img_(), img_matching_()
+        ratio_(0.9f), training_img_(), img_matching_()
     {
         // ORB is the default feature
         detector_ = cv::ORB::create();

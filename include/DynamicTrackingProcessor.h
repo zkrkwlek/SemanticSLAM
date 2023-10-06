@@ -32,6 +32,7 @@ namespace SemanticSLAM {
 	public:
 		static void Init();
 		static void UpdateKalmanFilter(EdgeSLAM::ObjectNode* pObject, int nPnP, cv::Mat _Pcw, cv::Mat& _Pco, cv::Mat& Pwo);
+		static void UpdateConfidence(EdgeSLAM::ObjectTrackingFrame* pFrame, cv::Mat Pcw, cv::Mat Pco, cv::Mat Pwo, cv::Mat Ow, cv::Mat K);
 		static void ObjectTracking(ThreadPool::ThreadPool* POOL, EdgeSLAM::SLAM* SLAM, std::string user, EdgeSLAM::Frame* frame, const cv::Mat& img, int id);
 		static int ObjectRelocalization(EdgeSLAM::ObjectBoundingBox* pNewBox, EdgeSLAM::ObjectNode* pObject, EdgeSLAM::ObjectTrackingResult* pTrackRes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P);
 		static void drawBoundingBox(cv::Mat& imgage, const cv::Mat& Pco, const cv::Mat& K, float radx, float rady, float radz);

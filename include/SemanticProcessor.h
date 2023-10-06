@@ -15,39 +15,17 @@ namespace EdgeSLAM {
 	class ObjectMapPoint;
 	class Map;
 	class SLAM;
+	class ObjectLabel;
+	class SemanticLabel;
 }
 
 namespace SemanticSLAM {
 
-	enum class MovingObjectLabel {
-		PERSON = 1,
-		CHAIR = 57,
-		REFRIGERATOR = 73,
-		HANDBAG = 27,
-		SUITCASE = 29,
-		LAPTOP = 64,
-		KEYBOARD = 67,
-		SKATEBOARD = 37,
-		SNOWBOARD =32,
-		BYCYCLE=2,
-		REMOTE=66
-	};
-
-	enum class StructureLabel {
-		WALL = 1,
-		FLOOR = 4,
-		CEIL = 6,
-		CHAIR = 20,
-		BUILDING = 2,//바닥 벽처럼 인식
-		EARTH = 14,
-		TABLE = 16
-	};
+	
 	static ConcurrentSet<int> ObjectWhiteList; //맵 생성 리스트
 	static ConcurrentMap<int, int> ObjectCandidateList; //노이즈 고려해서 체크하는 리스트, A이면 B가 되게. 수트이면 의자 고려
 	static ConcurrentSet<int> LabelWhiteList;
-
-	class ObjectLabel;
-	class SemanticLabel;
+		
 	class SemanticProcessor {
 	public:
 		SemanticProcessor();
@@ -82,11 +60,12 @@ namespace SemanticSLAM {
 	public:
 		static ConcurrentMap<int, std::vector<cv::Point2f>> SuperPoints;
 		static ConcurrentMap<int, cv::Mat> SemanticLabelImage;
-		static ConcurrentMap<int, ObjectLabel*> ObjectLabels;
-		static ConcurrentMap<int, SemanticLabel*> SemanticLabels;
+		//static ConcurrentMap<int, ObjectLabel*> ObjectLabels;
+		//static ConcurrentMap<int, SemanticLabel*> SemanticLabels;
 		static std::vector<cv::Vec3b> SemanticColors;
 		static std::vector<std::string> vecStrSemanticLabels, vecStrObjectLabels;
 
+		static ConcurrentMap<EdgeSLAM::KeyFrame*, EdgeSLAM::ObjectBoundingBox*> GraphKFAndPerson;
 		static ConcurrentMap<EdgeSLAM::ObjectNode*, std::set<EdgeSLAM::KeyFrame*>> GraphObjectKeyFrame;
 		static ConcurrentMap<EdgeSLAM::KeyFrame*, std::set<EdgeSLAM::ObjectNode*>> GraphKeyFrameObject;
 		static ConcurrentMap<int, int> GlobalObjectCount;

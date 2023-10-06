@@ -3,6 +3,7 @@
 #include <User.h>
 #include "MarkerProcessor.h"
 #include "SemanticProcessor.h"
+#include "Node.h"
 
 namespace SemanticSLAM {
 	std::atomic<int> ContentProcessor::nContentID = 0;
@@ -152,6 +153,7 @@ namespace SemanticSLAM {
 		auto pMap = SLAM->GetMap(pUser->mapName);
 
 		std::set<Content*> spContents;
+		std::set<EdgeSLAM::Node*> spNodes;
 		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
 			auto pKFi = *iter;
 			std::map<int, Content*> mapContents;
@@ -372,7 +374,7 @@ namespace SemanticSLAM {
 		//std::cout <<"Add = " << data.t() << std::endl;
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
 		
-		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(100);
+		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs =  pKF->GetBestCovisibilityKeyFrames(100);
 		vpLocalKFs.push_back(pKF);
 		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
 			auto pKFi = *iter;
@@ -563,7 +565,7 @@ namespace SemanticSLAM {
 			std::memcpy(fdata.data, res.data(), res.size());*/
 			float len = fdata.at<float>(0);
 			pContent->data = fdata.rowRange(0, len).clone();
-
+			//std::cout << fdata.rowRange(13, 17).t() << std::endl;
 			{
 				std::map<int, cv::Mat> mapDatas;
 				if (SLAM->TemporalDatas2.Count("content"))

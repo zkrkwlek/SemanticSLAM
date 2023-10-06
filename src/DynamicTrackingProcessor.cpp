@@ -7,6 +7,7 @@
 #include <User.h>
 #include <PlaneEstimator.h>
 #include <KalmanFilter.h>
+#include <Confidence.h>
 
 namespace SemanticSLAM {
 
@@ -74,6 +75,66 @@ namespace SemanticSLAM {
         }
     }
 
+    void DynamicTrackingProcessor::UpdateConfidence(EdgeSLAM::ObjectTrackingFrame* pTrackFrame, cv::Mat Pcw, cv::Mat Pco, cv::Mat Pwo, cv::Mat Ow, cv::Mat K) {
+        Plane* Floor = nullptr;
+        if (PlaneEstimator::GlobalFloor)
+        {
+            Floor = PlaneEstimator::GlobalFloor;
+        }
+
+        cv::Mat Pwc = Pcw.inv();
+
+        cv::Mat Rco = Pco.rowRange(0, 3).colRange(0, 3);
+        cv::Mat tco = Pco.rowRange(0, 3).col(3);
+
+        cv::Mat Rwo = Pwo.rowRange(0, 3).colRange(0, 3);
+        cv::Mat two = Pwo.rowRange(0, 3).col(3);
+
+        cv::Mat Rcw = Pcw.rowRange(0, 3).colRange(0, 3);
+        cv::Mat tcw = Pcw.rowRange(0, 3).col(3);
+
+        //cv::Mat P
+        for (int i = 0, N = pTrackFrame->mvImagePoints.size(); i < N; i++) {
+            auto pMPi = pTrackFrame->mvpMapPoints[i];
+            if (!pMPi || pMPi->isBad())
+                continue;
+            if (!pMPi->mpConfidence) {
+                pMPi->mpConfidence = new Confidence();
+            }
+            
+            cv::Mat Xo = pMPi->GetWorldPos() - Ow;
+            cv::Mat Xw = pMPi->GetWorldPos();
+
+            cv::Mat Xw2 = Rwo * Xo + two;
+            ////cv::Mat d1 = Xw2 - pMPi->GetWorldPos();
+            //
+            cv::Mat p1 = K* (Rco * Xo + tco);
+            cv::Mat p2 = K * (Rcw * Xw + tcw);
+
+            float d1 = p1.at<float>(2);
+            float d2 = p2.at<float>(2);
+
+            cv::Point2f pt1(p1.at<float>(0) / d1, p1.at<float>(1) / d1);    //오브젝트
+            cv::Point2f pt2(p2.at<float>(0) / d2, p2.at<float>(1) / d2);    //슬램
+
+            pMPi->mpConfidence->CalcConfidence(pt2, pTrackFrame->mvImagePoints[i]);
+            if (Floor) {
+                float dist3 = Floor->Distacne(pMPi->GetWorldPos());
+                pMPi->mpConfidence->CalcConfidence(abs(dist3));
+            }
+            //auto diff1 = pt1 - pt2;
+            //auto diff2 = Xw - Xw2;
+
+            ////std::cout <<pt1<<" "<<pt2 <<" "<<pTrackFrame->mvImagePoints[i] << diff1.dot(diff1) << " " << diff2.dot(diff2) << std::endl;
+            //if (Floor) {
+            //    float dist3 = Floor->Distacne(pMPi->GetWorldPos());
+            //    std::cout << sqrt(diff1.dot(diff1)) << " " << sqrt(diff2.dot(diff2)) <<" "<<dist3 << std::endl;
+            //}
+           
+        }
+
+    }
+
     void DynamicTrackingProcessor::UpdateKalmanFilter(EdgeSLAM::ObjectNode* pObject, int nPnP, cv::Mat _Pcw, cv::Mat& _Pco, cv::Mat& Pwo) {
 
         cv::Mat Pcw, Pco;
@@ -118,7 +179,13 @@ namespace SemanticSLAM {
         pObject->SetWorldPose(Pwo);
     }
 
+    int nTrack = 0;
+    float totalTime3 = 0.0f;
+
     int DynamicTrackingProcessor::ObjectTracking2(EdgeSLAM::SLAM* SLAM, EdgeSLAM::ObjectTrackingResult* pTrackRes, EdgeSLAM::Frame* frame, const cv::Mat& newframe, int fid, const cv::Mat& Pcw, const cv::Mat& K) {
+        
+        std::chrono::high_resolution_clock::time_point t_track_start = std::chrono::high_resolution_clock::now();
+
         auto pTrackFrame = pTrackRes->mpLastFrame;
         auto pObject = pTrackRes->mpObject;
         //일단 옵티컬 플로우로 테스트부터
@@ -283,6 +350,12 @@ namespace SemanticSLAM {
         //update
         pTrackRes->mnLastTrackFrameId = fid;
         
+        std::chrono::high_resolution_clock::time_point t_track_end = std::chrono::high_resolution_clock::now();
+        auto du_track = std::chrono::duration_cast<std::chrono::milliseconds>(t_track_end - t_track_start).count();
+        nTrack++;
+        totalTime3 += (du_track / 1000.0);
+        std::cout << "tracking avg = " << totalTime3 / nTrack << std::endl;
+
     }
 
     int DynamicTrackingProcessor::ObjectRelocalization(EdgeSLAM::ObjectBoundingBox* pNewBox, EdgeSLAM::ObjectNode* pObject, EdgeSLAM::ObjectTrackingResult* pTrackRes, const cv::Mat& newframe, const cv::Mat& K, cv::Mat& P) {
@@ -308,7 +381,7 @@ namespace SemanticSLAM {
             auto pNeighBox = *iter;
             std::vector<cv::DMatch> good_matches;
             rmatcher.robustMatch(newframe, cv::Mat(), pNewBox->mvKeys, pNewBox->desc, pNeighBox->mvKeys, pNeighBox->desc, good_matches);
-
+            std::cout << good_matches.size() <<" "<< pNewBox->mvKeys.size()<<" "<<pNeighBox->mvKeys.size() << std::endl;
             for (unsigned int match_index = 0; match_index < good_matches.size(); ++match_index)
             {
                 int newIdx = good_matches[match_index].queryIdx;
@@ -324,6 +397,7 @@ namespace SemanticSLAM {
                 nGood++;
             }
         }
+        std::cout << "relocal test = " << nCandidates<<" "<< nGood << std::endl;
 
         P = cv::Mat::eye(4, 4, CV_32FC1);
         bool bRes = false;

@@ -94,15 +94,27 @@ void RobustMatcher::robustMatch(const cv::Mat& frame, const cv::Mat& keyframe,
     // 2a. From image 1 to image 2
     matcher_->knnMatch(descriptors_frame, descriptors_model, matches12, 2); // return 2 nearest neighbours
     // 2b. From image 2 to image 1
-    matcher_->knnMatch(descriptors_model, descriptors_frame, matches21, 2); // return 2 nearest neighbours
+    //matcher_->knnMatch(descriptors_model, descriptors_frame, matches21, 2); // return 2 nearest neighbours
     // 3. Remove matches for which NN ratio is > than threshold
     // clean image 1 -> image 2 matches
     int r1 = ratioTest(matches12);
     // clean image 2 -> image 1 matches
-    int r2 = ratioTest(matches21);
+    //int r2 = ratioTest(matches21);
     // 4. Remove non-symmetrical matches
-    symmetryTest(matches12, matches21, good_matches);
+    //symmetryTest(matches12, matches21, good_matches);
 
+    // for all matches image 1 -> image 2
+    for (std::vector<std::vector<cv::DMatch> >::const_iterator
+        matchIterator1 = matches12.begin(); matchIterator1 != matches12.end(); ++matchIterator1)
+    {
+        // ignore deleted matches
+        if (matchIterator1->empty() || matchIterator1->size() < 2)
+            continue;
+
+        good_matches.push_back(cv::DMatch((*matchIterator1)[0].queryIdx,
+            (*matchIterator1)[0].trainIdx, (*matchIterator1)[0].distance));
+    }
+    std::cout << "aaa " << good_matches.size()<<" "<<r1<<" "<<matches12.size() << std::endl;
     //std::cout << "Match test = " << good_matches .size()<<"==" << matches12.size() << " " << matches21.size() << " " << r1 << " " << r2 << std::endl;
     if (!keyframe.empty() && !keypoints_model.empty())
     {
