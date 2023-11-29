@@ -98,7 +98,6 @@ namespace SemanticSLAM {
 				auto pCell = p->mGrid[i][j];
 				pCell->AddObservation(this, i*iend + j);
 				this->mGrid[i][j] = pCell;
-
 			}
 		}
 	}

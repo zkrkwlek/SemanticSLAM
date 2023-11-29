@@ -84,6 +84,7 @@ namespace SemanticSLAM {
 		cv::Mat line;
 		int nScore;
 	public:
+		bool CalcPosition(cv::Mat& Xp, float x, float y, cv::Mat Kinv, cv::Mat Tinv, cv::Mat O);
 		float Distacne(cv::Mat X);
 	private:
 	};

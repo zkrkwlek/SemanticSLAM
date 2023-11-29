@@ -5,9 +5,15 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/core.hpp>
 #include <ConcurrentMap.h>
+#include <ConcurrentSet.h>
 #include <atomic>
 
+namespace EdgeSLAM {
+	class KeyFrame;
+}
+
 namespace SemanticSLAM {
+	class Plane;
 	class GridFrame;
 	class Label {
 	public:
@@ -25,7 +31,8 @@ namespace SemanticSLAM {
 		cv::Mat matLabels;
 		std::mutex mMutexObject;
 	};
-
+	//평면들 정보도 알고 있으면 좋음
+	
 	class GridCell {
 	public:
 		GridCell();

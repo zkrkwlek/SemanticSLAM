@@ -45,6 +45,7 @@ namespace SemanticSLAM {
 		static void CreateBoundingBox(EdgeSLAM::SLAM* SLAM, std::string user, int id, EdgeSLAM::KeyFrame* pTargetKF, cv::Mat labeled);
 
 		static void Init(EdgeSLAM::SLAM* _SLAM);
+		static void MapUpdateWithPlane(EdgeSLAM::SLAM* SLAM, EdgeSLAM::Map* MAP);
 		static void ObjectMapUpdateWithPlane(EdgeSLAM::SLAM* SLAM, EdgeSLAM::Map* MAP);
 		static void DenseOpticalFlow(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void MultiViewStereo(EdgeSLAM::SLAM* SLAM, std::string user, int id);
@@ -65,6 +66,7 @@ namespace SemanticSLAM {
 		static std::vector<cv::Vec3b> SemanticColors;
 		static std::vector<std::string> vecStrSemanticLabels, vecStrObjectLabels;
 
+		static ConcurrentMap<EdgeSLAM::KeyFrame*, cv::Mat> GraphKFNLabel;
 		static ConcurrentMap<EdgeSLAM::KeyFrame*, EdgeSLAM::ObjectBoundingBox*> GraphKFAndPerson;
 		static ConcurrentMap<EdgeSLAM::ObjectNode*, std::set<EdgeSLAM::KeyFrame*>> GraphObjectKeyFrame;
 		static ConcurrentMap<EdgeSLAM::KeyFrame*, std::set<EdgeSLAM::ObjectNode*>> GraphKeyFrameObject;

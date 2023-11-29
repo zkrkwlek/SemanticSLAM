@@ -28,7 +28,7 @@ void RobustMatcher::computeDescriptors( const cv::Mat& image, std::vector<cv::Ke
 int RobustMatcher::ratioTest(std::vector<std::vector<cv::DMatch> > &matches)
 {
     int removed = 0;
-    // for all matches
+    // for all matches 
     for ( std::vector<std::vector<cv::DMatch> >::iterator
           matchIterator= matches.begin(); matchIterator!= matches.end(); ++matchIterator)
     {
@@ -114,7 +114,8 @@ void RobustMatcher::robustMatch(const cv::Mat& frame, const cv::Mat& keyframe,
         good_matches.push_back(cv::DMatch((*matchIterator1)[0].queryIdx,
             (*matchIterator1)[0].trainIdx, (*matchIterator1)[0].distance));
     }
-    std::cout << "aaa " << good_matches.size()<<" "<<r1<<" "<<matches12.size() << std::endl;
+    
+
     //std::cout << "Match test = " << good_matches .size()<<"==" << matches12.size() << " " << matches21.size() << " " << r1 << " " << r2 << std::endl;
     if (!keyframe.empty() && !keypoints_model.empty())
     {

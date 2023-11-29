@@ -12,6 +12,7 @@
 #include <Node.h>
 
 namespace SemanticSLAM {
+	class Grid;
 	class Path {
 	public:
 		float speed;
@@ -69,6 +70,7 @@ namespace SemanticSLAM {
 		int mnContentModelID;
 		std::string src;
 		Path* mpPath;
+		Grid* mpGrid;
 	};
 	class ContentProcessor {
 	public:

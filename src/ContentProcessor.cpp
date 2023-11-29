@@ -3,6 +3,7 @@
 #include <User.h>
 #include "MarkerProcessor.h"
 #include "SemanticProcessor.h"
+#include "GridProcessor.h"
 #include "Node.h"
 
 namespace SemanticSLAM {
@@ -16,7 +17,7 @@ namespace SemanticSLAM {
 
 	//임시로 마커 아이디에 다른 타입이 들어감. 테스트 다시 해야 함. 드로우용 컨텐츠 생성하기 위해서
 	Content::Content():Node(){}
-	Content::Content(const cv::Mat& _X, std::string _src, int _modelID, long long ts):Node(),mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), mbMoving(false), mpPath(nullptr)
+	Content::Content(const cv::Mat& _X, std::string _src, int _modelID, long long ts):Node(),mnID(++ContentProcessor::nContentID), mnNextID(0), mnContentModelID(_modelID), mnMarkerID(_modelID), src(_src), mbMoving(false), mpPath(nullptr), mpGrid(nullptr)
 	,mnLastUpdatedTime(ts)
 	{
 		float len = _X.at<float>(0);
@@ -150,11 +151,33 @@ namespace SemanticSLAM {
 		pUser->mnDebugAR++;
 		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(50);
 		vpLocalKFs.push_back(pKF);
-		auto pMap = SLAM->GetMap(pUser->mapName);
 
+		std::set<Grid*> setGrids;
 		std::set<Content*> spContents;
 		std::set<EdgeSLAM::Node*> spNodes;
 		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
+			auto pKFi = *iter;
+			if (GridProcessor::GlobalKeyFrameNGrids.Count(pKFi)) {
+				auto spGrids = GridProcessor::GlobalKeyFrameNGrids.Get(pKFi);
+				for (auto jter = spGrids.begin(), jend = spGrids.end(); jter != jend; jter++) {
+					auto pTempGrid = *jter;
+					if (setGrids.count(pTempGrid))
+						continue;
+					setGrids.insert(pTempGrid);
+				}//for jter
+			}//if
+		}//iter
+		for (auto iter = setGrids.begin(), iend = setGrids.end(); iter != iend; iter++) {
+			auto pGrid = *iter;
+			auto spVOs = pGrid->ConnectedVOs.Get();
+			for (auto jter = spVOs.begin(), jend = spVOs.end(); jter != jend; jter++) {
+				auto pContent = *jter;
+				spContents.insert(pContent);
+			}
+		}
+
+		//auto pMap = SLAM->GetMap(pUser->mapName);
+		/*for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
 			auto pKFi = *iter;
 			std::map<int, Content*> mapContents;
 			if (ContentMap.Count(pKFi)) {
@@ -165,7 +188,8 @@ namespace SemanticSLAM {
 						spContents.insert(pContent);
 				}
 			}
-		}
+		}*/
+
 		auto pMarkerObjects = MarkerContentMap.Get();
 		for (auto iter = pMarkerObjects.begin(); iter != pMarkerObjects.end(); iter++) {
 			auto pContent = iter->second;
@@ -287,6 +311,24 @@ namespace SemanticSLAM {
 		return nullptr;
 	}
 	void ContentProcessor::ResetContent(EdgeSLAM::SLAM* SLAM) {
+		auto mapContents = AllContentMap.Get();
+		std::set<Grid*> spGrids;
+		for (auto iter = mapContents.begin(), iend = mapContents.end(); iter != iend; iter++) {
+			auto pContent = iter->second;
+			if (!pContent)
+				continue;
+			auto pGrid = pContent->mpGrid;
+			if (!pGrid)
+				continue;
+			if (spGrids.count(pGrid))
+				continue;
+			spGrids.insert(pGrid);
+		}
+		for (auto iter = spGrids.begin(), iend = spGrids.end(); iter != iend; iter++) {
+			auto pGrid = *iter;
+			pGrid->ConnectedVOs.Clear();
+		}
+
 		AllContentMap.Clear();
 		ContentMap.Clear();
 		MarkerContentMap.Clear();
@@ -374,7 +416,7 @@ namespace SemanticSLAM {
 		//std::cout <<"Add = " << data.t() << std::endl;
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
 		
-		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs =  pKF->GetBestCovisibilityKeyFrames(100);
+		/*std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs =  pKF->GetBestCovisibilityKeyFrames(100);
 		vpLocalKFs.push_back(pKF);
 		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
 			auto pKFi = *iter;
@@ -383,7 +425,7 @@ namespace SemanticSLAM {
 				mapContents = ContentMap.Get(pKFi);
 			mapContents[pNewContent->mnID] = pNewContent;
 			ContentMap.Update(pKFi, mapContents);
-		}
+		}*/
 
 		{
 			std::map<int, cv::Mat> mapDatas;
@@ -396,6 +438,8 @@ namespace SemanticSLAM {
 			mapDatas[pNewContent->mnID] = X;
 			//std::cout << "add = " << X.t() << std::endl;
 			SLAM->TemporalDatas2.Update("content", mapDatas);
+			pNewContent->mpGrid = GridProcessor::GetGrid(X);
+			pNewContent->mpGrid->ConnectedVOs.Update(pNewContent);
 		}
 
 		//std::cout << "temp content" << data.at<float>(0) << " " << data.at<float>(1) << " " << data.at<float>(5) << " " << data.at<float>(7) << " || " << data.at<float>(6) << " " << data.at<float>(8) << std::endl;
@@ -542,7 +586,7 @@ namespace SemanticSLAM {
 			SLAM->pool->EnqueueJob(ManageMovingObj, SLAM, id);
 		}
 		else {
-			std::cout << "error?" << std::endl;
+			std::cout << "MovingObjectSync=error" << std::endl;
 		}
 	}
 
@@ -577,6 +621,23 @@ namespace SemanticSLAM {
 				mapDatas[pContent->mnID] = X;
 				SLAM->TemporalDatas2.Update("content", mapDatas);
 				//std::cout << "upadte = " <<pContent->mnID<<" " << X.t() << std::endl;
+
+				//GridProcessor::ConnectVO(X, id);
+				//그리드가 다르면 변경해야 함.
+				auto pPrevGrid = pContent->mpGrid;
+				if (pPrevGrid) {
+					auto pCurrGrid = GridProcessor::GetGrid(X);
+					std::cout << pCurrGrid->pos.t() << std::endl; //삭제 해야 함. 왜 안되는지는 모름
+					if (pPrevGrid != pCurrGrid) {
+						/*if (!pCurrGrid)
+							std::cout << "grid error ?????????" << std::endl;
+						std::cout << "grid test = " << pPrevGrid->pos.t()<<" " << pCurrGrid->pos.t() << std::endl;
+						*/
+						pPrevGrid->ConnectedVOs.Erase(pContent);
+						pCurrGrid->ConnectedVOs.Update(pContent);
+						pContent->mpGrid = pCurrGrid;
+					}
+				}
 			}
 
 			pContent->mnLastUpdatedTime = ts;
@@ -592,7 +653,7 @@ namespace SemanticSLAM {
 
 		}
 		else {
-			std::cout << "error?" << std::endl;
+			std::cout << "error???????????" << std::endl;
 		}
 
 	}

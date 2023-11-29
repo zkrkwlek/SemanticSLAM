@@ -158,6 +158,22 @@ namespace SemanticSLAM {
 		return ((float)this->normal.dot(X))+a;
 	}
 
+	bool Plane::CalcPosition(cv::Mat& Xp, float x, float y, cv::Mat Kinv, cv::Mat Tinv, cv::Mat O) {
+		cv::Mat x3D = (cv::Mat_<float>(3, 1) << x,y, 1.0);
+		cv::Mat Xw = Kinv * x3D;
+		Xw.push_back(cv::Mat::ones(1, 1, CV_32FC1)); //3x1->4x1
+		Xw = Tinv * Xw; // 4x4 x 4 x 1
+		Xw = Xw.rowRange(0, 3) / Xw.at<float>(3); // 4x1 -> 3x1
+		cv::Mat dir = Xw - O; //3x1
+		float dist = param.at<float>(3);
+		float a = -normal.dot(dir);
+		if (std::abs(a) < 0.000001)
+			return false;
+		float u = (normal.dot(O) + dist) / a;
+		Xp = O + dir * u;
+		return true;
+	}
+
 	void PlaneEstimator::UpdateLocalMapPlanes (EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		//std::cout << "UpdateLocalMapPlanes start" << std::endl;
 		auto pUser = SLAM->GetUser(user);
@@ -171,7 +187,6 @@ namespace SemanticSLAM {
 			return;
 		}
 		pUser->mnUsed++;
-
 		////로컬맵의 KF 얻기
 		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(20);
 		vpLocalKFs.push_back(pKF);
