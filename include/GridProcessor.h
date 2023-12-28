@@ -42,9 +42,9 @@ namespace SemanticSLAM {
 		static void CalcGrid(EdgeSLAM::SLAM* SLAM, std::string user, int id, cv::Mat label);
 		static Grid* GetGrid(cv::Mat X);
 		static Grid* SearchGrid(int xidx, int yidx, int zidx);
-		static std::vector<cv::Point2f> ProjectdGrid(int x, int y, int z, float gsize, cv::Mat K, cv::Mat R, cv::Mat t);
+		static std::vector<std::pair<cv::Point2f, bool>> ProjectdGrid(int x, int y, int z, float gsize, cv::Mat K, cv::Mat R, cv::Mat t);
 	private:
-		static cv::Point2f ProjectCorner(int x, int y, int z, float gsize, cv::Mat K, cv::Mat R, cv::Mat t);
+		static std::pair<cv::Point2f, bool> ProjectCorner(int x, int y, int z, float gsize, cv::Mat K, cv::Mat R, cv::Mat t);
 	public:
 		static std::atomic<int> nGridID;
 		static ConcurrentMap<EdgeSLAM::KeyFrame*, std::set<Grid*>> GlobalKeyFrameNGrids;

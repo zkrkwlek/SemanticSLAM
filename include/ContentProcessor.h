@@ -78,10 +78,13 @@ namespace SemanticSLAM {
 		static void TestTouch(std::string user, int id);
 		static void UpdateLatency(std::string keyword, std::string user, int id);
 		/////////
+		//sharecontent에서 mat 데이터 생성으로 변경
+		static void GenerateGraphDataForSync(EdgeSLAM::SLAM* SLAM, EdgeSLAM::User* pUser, cv::Mat& data, int id, long long ts);
 		static void ResetContent(EdgeSLAM::SLAM* SLAM);
 		static void ShareContent(EdgeSLAM::SLAM* SLAM, std::string user, int id);
-		static void ContentProcess(EdgeSLAM::SLAM* system, std::string user, int id, std::string kewword, int mid);
-		static int ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, const cv::Mat& data, int mid);
+		static void ContentProcess(EdgeSLAM::SLAM* system, std::string user, int id, std::string kewword, double ts, int mid);
+		static int SimulRegistration(EdgeSLAM::SLAM* SLAM, std::string user, const cv::Mat& data, int mid);
+		static int ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, const cv::Mat& data, int mid, int nKF);
 		static void DrawContentProcess(EdgeSLAM::SLAM* system, std::string user, int id, std::string kewword, int mid);
 		static void DrawContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int mid);
 		static int MarkerContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, cv::Mat data, int id);
@@ -91,6 +94,7 @@ namespace SemanticSLAM {
 		static void ManageMovingObj(EdgeSLAM::SLAM* SLAM, int id);
 		static void UpdateProcess(EdgeSLAM::SLAM* system, std::string user, int id);
 		/////////TEST
+		static void DirectCommuTest(EdgeSLAM::SLAM* SLAM, EdgeSLAM::User* USER, cv::Mat& data, int id, double ts, int N);
 		static void DirectTest(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void IndirectTest(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		static void IndirectSend(EdgeSLAM::SLAM* SLAM, std::string user, int id);
@@ -105,9 +109,9 @@ namespace SemanticSLAM {
 		static ConcurrentMap<int, Content*> MarkerContentMap;
 		static ConcurrentMap<EdgeSLAM::KeyFrame*, std::map<int, Content*>> ContentMap;
 		static ConcurrentMap<int, cv::Mat> MapArucoMarkerPos;
-
-
 		static ConcurrentMap<EdgeSLAM::KeyFrame*, std::map<int, std::string>> AnchorIDs;
+		static std::atomic<int> mnNumNeighKFs;
+		static bool mbSaveLatency;
 	private:
 		
 	};

@@ -64,16 +64,19 @@ namespace SemanticSLAM {
 		return g;
 	}
 
-	std::vector<cv::Point2f> GridProcessor::ProjectdGrid(int x, int y, int z, float gsize, cv::Mat K, cv::Mat R, cv::Mat t) {
-		std::vector<cv::Point2f> res;
+	std::vector<std::pair<cv::Point2f, bool>> GridProcessor::ProjectdGrid(int x, int y, int z, float gsize, cv::Mat K, cv::Mat R, cv::Mat t) {
+		std::vector<std::pair<cv::Point2f, bool>> res;
+		
+		//std::vector<cv::Point2f> res;
 		res.push_back(ProjectCorner(x,   y,   z, gsize, K, R, t));
 		res.push_back(ProjectCorner(x,   y, z+1, gsize, K, R, t));
 		res.push_back(ProjectCorner(x+1, y,   z, gsize, K, R, t));
 		res.push_back(ProjectCorner(x+1, y, z+1, gsize, K, R, t));
+
 		return res;
 	}
 
-	cv::Point2f GridProcessor::ProjectCorner(int x, int y, int z, float gsize, cv::Mat K, cv::Mat R, cv::Mat t) {
+	std::pair<cv::Point2f, bool> GridProcessor::ProjectCorner(int x, int y, int z, float gsize, cv::Mat K, cv::Mat R, cv::Mat t) {
 		float gx = x * gsize;
 		float gy = y * gsize;
 		float gz = z * gsize;
@@ -82,7 +85,8 @@ namespace SemanticSLAM {
 		cv::Mat Ximg = K * Xcam;
 		float depth = Ximg.at<float>(2);
 		cv::Point2f pt(Ximg.at<float>(0) / depth, Ximg.at<float>(1) / depth);
-		return pt;
+		bool bDepth = depth > 0.0;
+		return std::make_pair(pt, bDepth);
 	}
 
 	void GridProcessor::CalcGridWithKF(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF) {
@@ -135,8 +139,8 @@ namespace SemanticSLAM {
 							continue;
 						
 						//그리드 시각화용
-						auto corners = ProjectdGrid(xidx, yidx, zidx, GridSize, K, R, t);
-						vecProjectedCorners.push_back(corners);
+						//auto corners = ProjectdGrid(xidx, yidx, zidx, GridSize, K, R, t);
+						//vecProjectedCorners.push_back(corners);
 						//그리드 시각화용
 						if (setGrids.count(pGrid))
 							continue;

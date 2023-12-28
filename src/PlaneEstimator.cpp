@@ -174,6 +174,82 @@ namespace SemanticSLAM {
 		return true;
 	}
 
+	void PlaneEstimator::GeneratePlaneDataForSync(EdgeSLAM::SLAM* SLAM, EdgeSLAM::User* pUser, cv::Mat& totaldata, int id, long long ts) {
+
+		totaldata = cv::Mat::zeros(2, 1, CV_32FC1);
+		totaldata.at<float>(0) = 2.0; //size
+		totaldata.at<float>(1) = 4.0; //parsing id
+		
+		auto pKF = pUser->mpRefKF;
+		if (pKF) {
+			////로컬맵의 KF 얻기
+			std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(20);
+			vpLocalKFs.push_back(pKF);
+			auto pMap = SLAM->GetMap(pUser->mapName);
+
+			//로컬맵의 평면 구성
+			cv::Mat R = pKF->GetRotation();
+			cv::Mat t = pKF->GetTranslation();
+
+			Plane* floor = nullptr;
+			Plane* ceil = nullptr;
+
+			if (GlobalFloor->nScore > 0)
+				floor = GlobalFloor;
+			if (GlobalCeil->nScore > 0)
+				ceil = GlobalCeil;
+			std::set<Plane*> tempWallPlanes;
+			for (std::vector<EdgeSLAM::KeyFrame*>::const_iterator itKF = vpLocalKFs.begin(), itEndKF = vpLocalKFs.end(); itKF != itEndKF; itKF++)
+			{
+				EdgeSLAM::KeyFrame* pKFi = *itKF;
+				if (mPlaneConnections.Count(pKFi)) {
+					auto tempPlanes = mPlaneConnections.Get(pKFi);
+					for (auto iter = tempPlanes.begin(), iend = tempPlanes.end(); iter != iend; iter++) {
+						auto plane = *iter;
+						if (plane->type != PlaneType::WALL) {
+							continue;
+						}
+						if (!tempWallPlanes.count(plane))
+							tempWallPlanes.insert(plane);
+					}
+				}
+			}
+
+			//오직 바닥 또는 천장만 존재하는 경우 일단 테스트 용으로
+			if (floor || ceil) {
+				cv::Mat data = cv::Mat::zeros(1, 1, CV_32FC1);
+				float N = 0;
+				if (floor) {
+					N++;
+					cv::Mat pid = cv::Mat::zeros(1, 1, CV_32FC1);
+					pid.at<float>(0) = 0.0;
+					data.push_back(pid);
+					data.push_back(floor->param);
+					//std::cout <<"SEND PLANE LINE TEST = "<< N << " " << floor->param.t() << std::endl;
+				}
+				if (ceil) {
+					N++;
+					cv::Mat pid = cv::Mat::zeros(1, 1, CV_32FC1);
+					pid.at<float>(0) = 1.0;
+
+					data.push_back(pid);
+					data.push_back(ceil->param);
+				}
+				for (auto iter = tempWallPlanes.begin(), iend = tempWallPlanes.end(); iter != iend; iter++) {
+					auto plane = *iter;
+					N++;
+					cv::Mat pid = cv::Mat::zeros(1, 1, CV_32FC1);
+					pid.at<float>(0) = (float)plane->mnID;
+					data.push_back(pid);
+					data.push_back(plane->param);
+				}
+				data.at<float>(0) = N;
+				totaldata.at<float>(0) = (float)(data.rows + 2);
+				totaldata.push_back(data);
+			}
+		}
+	}
+
 	void PlaneEstimator::UpdateLocalMapPlanes (EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		//std::cout << "UpdateLocalMapPlanes start" << std::endl;
 		auto pUser = SLAM->GetUser(user);

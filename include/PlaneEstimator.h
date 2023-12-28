@@ -96,6 +96,7 @@ namespace SemanticSLAM {
 	public:
 		static void Init();
 		static void PlaneEstimation(EdgeSLAM::SLAM* SLAM, std::string user, int id);
+		static void GeneratePlaneDataForSync(EdgeSLAM::SLAM* SLAM, EdgeSLAM::User* pUser, cv::Mat& data, int id, long long ts);
 		static void UpdateLocalMapPlanes(EdgeSLAM::SLAM* SLAM, std::string user, int id);
 		//static void EstimateLocalMapPlanes(EdgeSLAM::SLAM* system, std::string user, int id);
 	public:

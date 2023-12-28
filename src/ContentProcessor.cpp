@@ -5,9 +5,13 @@
 #include "SemanticProcessor.h"
 #include "GridProcessor.h"
 #include "Node.h"
+#include <ThreadPool.h>
 
 namespace SemanticSLAM {
 	std::atomic<int> ContentProcessor::nContentID = 0;
+
+	bool ContentProcessor::mbSaveLatency;
+
 	ConcurrentMap<EdgeSLAM::KeyFrame*, std::map<int, Content*>> ContentProcessor::ContentMap;
 	ConcurrentMap<int, Content*> ContentProcessor::AllContentMap;
 	ConcurrentMap<int, Content*> ContentProcessor::MarkerContentMap;
@@ -133,7 +137,145 @@ namespace SemanticSLAM {
 		IndirectData.Update(id, user);
 		pUser->mnUsed--;
 	}
+	void ContentProcessor::GenerateGraphDataForSync(EdgeSLAM::SLAM* SLAM, EdgeSLAM::User* pUser, cv::Mat& totaldata, int id, long long ts) {
+		
+		totaldata = cv::Mat::zeros(2, 1, CV_32FC1);
+		totaldata.at<float>(0) = 2.0; //data size
+		totaldata.at<float>(1) = 3.0; //parsing id
+		
+		auto pKF = pUser->mpRefKF;
+		if (pKF) {
+			//사전 작업
+			bool bGridCommu = pUser->mbCommuTest;
+			int nKFs = pUser->mnContentKFs;
+			std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(nKFs);
+			vpLocalKFs.push_back(pKF);
 
+			//관련 데이터
+			std::set<Grid*> setGrids;
+			std::set<Content*> spContents;
+			std::set<EdgeSLAM::Node*> spNodes;
+
+			if (bGridCommu) {
+
+				std::vector<std::vector<cv::Point2f>> vecProjectedCorners;
+
+				for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
+					auto pKFi = *iter;
+					if (GridProcessor::GlobalKeyFrameNGrids.Count(pKFi)) {
+						auto spGrids = GridProcessor::GlobalKeyFrameNGrids.Get(pKFi);
+						for (auto jter = spGrids.begin(), jend = spGrids.end(); jter != jend; jter++) {
+							auto pTempGrid = *jter;
+							if (setGrids.count(pTempGrid))
+								continue;
+							setGrids.insert(pTempGrid);
+						}//for jter
+					}//if
+				}//iter
+				for (auto iter = setGrids.begin(), iend = setGrids.end(); iter != iend; iter++) {
+					auto pGrid = *iter;
+					auto spVOs = pGrid->ConnectedVOs.Get();
+					for (auto jter = spVOs.begin(), jend = spVOs.end(); jter != jend; jter++) {
+						auto pContent = *jter;
+						if (spContents.count(pContent)) {
+							continue;
+						}
+						spContents.insert(pContent);
+					}
+				}
+			}
+			else {
+				for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
+					auto pKFi = *iter;
+					std::map<int, Content*> mapContents;
+					if (ContentMap.Count(pKFi)) {
+						mapContents = ContentMap.Get(pKFi);
+						for (auto jter = mapContents.begin(), jend = mapContents.end(); jter != jend; jter++) {
+							auto pContent = jter->second;
+							if (!spContents.count(pContent))
+								spContents.insert(pContent);
+						}
+					}
+				}
+			}
+
+			//실험일 때 전체 데이터 보내기
+			bool bSyncTypeTest = pUser->mbVOSyncTest;
+			if (bSyncTypeTest) {
+				auto vecAllVOs = AllContentMap.Get();
+				for (int i = 0, iend = vecAllVOs.size(); i < iend; i++) {
+					auto pContent = vecAllVOs[i];
+					if (pContent) {
+						if (!spContents.count(pContent))
+							spContents.insert(pContent);
+					}
+				}
+			}
+
+			//마커 정보 현재는 이용 안함
+			auto pMarkerObjects = MarkerContentMap.Get();
+			for (auto iter = pMarkerObjects.begin(); iter != pMarkerObjects.end(); iter++) {
+				auto pContent = iter->second;
+				if (!spContents.count(pContent))
+					spContents.insert(pContent);
+			}
+
+			//연결 데이터, 관련 정보
+
+			cv::Mat assodata = cv::Mat::zeros(1, 1, CV_32FC1); //사이즈, id
+			cv::Mat posdata = cv::Mat::zeros(1, 1, CV_32FC1);  //사이즈, id, info
+			int nConnect = 0;
+			int nContent = 0;
+
+			//전송 정보
+			auto mapSynchedVOs = pUser->mapLastSyncedVOs.Get();
+			auto mapSendedVOs = pUser->mapLastSendedVOs.Get();
+
+			//cv::Mat data = cv::Mat::zeros(1, 1, CV_32FC1);
+			//data.at<float>(0) = spContents.size();
+			for (auto iter = spContents.begin(), iend = spContents.end(); iter != iend; iter++) {
+				auto pContent = *iter;
+				int contentID = pContent->mnID;
+				//동기화 선별 과정
+				bool bTrialSync = false;
+				long long lastUpdated = pContent->mnLastUpdatedTime;
+				if (mapSynchedVOs.count(contentID)) {
+					auto lastSynced = mapSynchedVOs[contentID];
+					if (lastUpdated > lastSynced) {
+						bTrialSync = true;
+					}
+				}
+				else {
+					bTrialSync = true;
+				}
+
+				cv::Mat tempAsso = cv::Mat::zeros(1, 1, CV_32FC1);
+				tempAsso.at<float>(0) = (float)contentID;
+				assodata.push_back(tempAsso);
+				nConnect++;
+
+				if (bTrialSync) {
+					pUser->mapLastSyncedVOs.Update(contentID, ts);
+					posdata.push_back(pContent->data);
+					nContent++;
+				}
+
+			}
+
+			/*
+			파싱 정보 = 3
+			전체 정보
+			연결 정보 = 개수, 아이디들
+			데이터 정보 = 개수, 개별 정보
+			*/
+			assodata.at<float>(0) = (float)nConnect;
+			posdata.at<float>(0) = (float)nContent;
+
+			totaldata.at<float>(0) = (float)(assodata.rows + posdata.rows + 2);
+			totaldata.push_back(assodata);
+			totaldata.push_back(posdata);
+		}
+	}
 	void ContentProcessor::ShareContent(EdgeSLAM::SLAM* SLAM, std::string user, int id) {
 		//std::cout << "ShareContent start" << std::endl;
 		auto pUser = SLAM->GetUser(user);
@@ -148,47 +290,67 @@ namespace SemanticSLAM {
 			pUser->mnUsed--;
 			return;
 		}
+
+		//타임스탬프
+		std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+		long long ts = start.time_since_epoch().count();
+
+		//사전 작업
+		bool bGridCommu = pUser->mbCommuTest;
+		int nKFs = pUser->mnContentKFs;
 		pUser->mnDebugAR++;
-		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(50);
+		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(nKFs);
 		vpLocalKFs.push_back(pKF);
 
+		//관련 데이터
 		std::set<Grid*> setGrids;
 		std::set<Content*> spContents;
 		std::set<EdgeSLAM::Node*> spNodes;
-		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
-			auto pKFi = *iter;
-			if (GridProcessor::GlobalKeyFrameNGrids.Count(pKFi)) {
-				auto spGrids = GridProcessor::GlobalKeyFrameNGrids.Get(pKFi);
-				for (auto jter = spGrids.begin(), jend = spGrids.end(); jter != jend; jter++) {
-					auto pTempGrid = *jter;
-					if (setGrids.count(pTempGrid))
-						continue;
-					setGrids.insert(pTempGrid);
-				}//for jter
-			}//if
-		}//iter
-		for (auto iter = setGrids.begin(), iend = setGrids.end(); iter != iend; iter++) {
-			auto pGrid = *iter;
-			auto spVOs = pGrid->ConnectedVOs.Get();
-			for (auto jter = spVOs.begin(), jend = spVOs.end(); jter != jend; jter++) {
-				auto pContent = *jter;
-				spContents.insert(pContent);
-			}
-		}
 
-		//auto pMap = SLAM->GetMap(pUser->mapName);
-		/*for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
-			auto pKFi = *iter;
-			std::map<int, Content*> mapContents;
-			if (ContentMap.Count(pKFi)) {
-				mapContents = ContentMap.Get(pKFi);
-				for (auto jter = mapContents.begin(), jend = mapContents.end(); jter != jend; jter++) {
-					auto pContent = jter->second;
-					if (!spContents.count(pContent))
-						spContents.insert(pContent);
+		
+		if (bGridCommu) {
+
+			std::vector<std::vector<cv::Point2f>> vecProjectedCorners;
+
+			for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
+				auto pKFi = *iter;
+				if (GridProcessor::GlobalKeyFrameNGrids.Count(pKFi)) {
+					auto spGrids = GridProcessor::GlobalKeyFrameNGrids.Get(pKFi);
+					for (auto jter = spGrids.begin(), jend = spGrids.end(); jter != jend; jter++) {
+						auto pTempGrid = *jter;
+						if (setGrids.count(pTempGrid))
+							continue;
+						setGrids.insert(pTempGrid);
+					}//for jter
+				}//if
+			}//iter
+			for (auto iter = setGrids.begin(), iend = setGrids.end(); iter != iend; iter++) {
+				auto pGrid = *iter;
+				auto spVOs = pGrid->ConnectedVOs.Get();
+				for (auto jter = spVOs.begin(), jend = spVOs.end(); jter != jend; jter++) {
+					auto pContent = *jter;
+					if(spContents.count(pContent)){
+						continue;
+					}
+					spContents.insert(pContent);
 				}
 			}
-		}*/
+		}
+		else {
+			for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
+				auto pKFi = *iter;
+				std::map<int, Content*> mapContents;
+				if (ContentMap.Count(pKFi)) {
+					mapContents = ContentMap.Get(pKFi);
+					for (auto jter = mapContents.begin(), jend = mapContents.end(); jter != jend; jter++) {
+						auto pContent = jter->second;
+						if (!spContents.count(pContent))
+							spContents.insert(pContent);
+					}
+				}
+			}
+		}
+		
 
 		auto pMarkerObjects = MarkerContentMap.Get();
 		for (auto iter = pMarkerObjects.begin(); iter != pMarkerObjects.end(); iter++) {
@@ -197,26 +359,65 @@ namespace SemanticSLAM {
 				spContents.insert(pContent);
 		}
 		 
-		cv::Mat data = cv::Mat::zeros(1, 1, CV_32FC1);
-		data.at<float>(0) = spContents.size();
+		//연결 데이터, 관련 정보
+		cv::Mat totaldata = cv::Mat::zeros(2, 1, CV_32FC1);
+		cv::Mat assodata = cv::Mat::zeros(1, 1, CV_32FC1); //사이즈, id
+		cv::Mat posdata = cv::Mat::zeros(1, 1, CV_32FC1);  //사이즈, id, info
+		int nConnect = 0;
+		int nContent = 0;
+
+		//전송 정보
+		auto mapSynchedVOs = pUser->mapLastSyncedVOs.Get();
+		auto mapSendedVOs  = pUser->mapLastSendedVOs.Get();
+
+		//cv::Mat data = cv::Mat::zeros(1, 1, CV_32FC1);
+		//data.at<float>(0) = spContents.size();
 		for (auto iter = spContents.begin(), iend = spContents.end(); iter != iend; iter++) {
 			auto pContent = *iter;
-			data.push_back(pContent->data);
-			/*cv::Mat id = cv::Mat::zeros(1, 1, CV_32FC1);
-			id.at<float>(0) = (float)pContent->mnID;
-			cv::Mat nid = cv::Mat::zeros(1, 1, CV_32FC1);
-			nid.at<float>(0) = (float)pContent->mnMarkerID;
-			data.push_back(id);
-			data.push_back(nid);
-			data.push_back(pContent->attribute);
-			data.push_back(pContent->pos);
-			data.push_back(pContent->endPos);*/
-			//방향 추가해야 함.
+			int contentID = pContent->mnID;
+			//동기화 선별 과정
+			bool bTrialSync = false;
+			long long lastUpdated = pContent->mnLastUpdatedTime;
+			if (mapSynchedVOs.count(contentID)) {
+				auto lastSynced = mapSynchedVOs[contentID];
+				if (lastUpdated > lastSynced) {
+					bTrialSync = true;
+				}
+			}
+			else {
+				bTrialSync = true;
+			}
+
+			cv::Mat tempAsso = cv::Mat::zeros(1, 1, CV_32FC1);
+			tempAsso.at<float>(0) = (float)contentID;
+			assodata.push_back(tempAsso);
+			nConnect++;
+
+			if (bTrialSync) {
+				pUser->mapLastSyncedVOs.Update(contentID, ts);
+				posdata.push_back(pContent->data);
+				nContent++;
+			}
+
 		}
 		
-		if (data.rows < 500) {
-			cv::Mat temp = cv::Mat::zeros(1000 - data.rows, 1, CV_32FC1);
-			data.push_back(temp);
+		/*
+		파싱 정보 = 3
+		전체 정보
+		연결 정보 = 개수, 아이디들
+		데이터 정보 = 개수, 개별 정보
+		*/
+		assodata.at<float>(0) = (float)nConnect;
+		posdata.at<float>(0) = (float)nContent;
+
+		totaldata.at<float>(0) = 3.0;
+		totaldata.at<float>(1) = (float)(assodata.rows+posdata.rows + 1);
+		totaldata.push_back(assodata);
+		totaldata.push_back(posdata);
+
+		if (totaldata.rows < 500) {
+			cv::Mat temp = cv::Mat::zeros(1000 - totaldata.rows, 1, CV_32FC1);
+			totaldata.push_back(temp);
 		}
 		
 		{
@@ -224,7 +425,7 @@ namespace SemanticSLAM {
 			std::stringstream ss;
 			ss << "/Store?keyword=LocalContent&id=" << id << "&src=" << user;
 			std::chrono::high_resolution_clock::time_point s = std::chrono::high_resolution_clock::now();
-			auto res = mpAPI->Send(ss.str(), data.data, data.rows * sizeof(float));
+			auto res = mpAPI->Send(ss.str(), totaldata.data, totaldata.rows * sizeof(float));
 			std::chrono::high_resolution_clock::time_point e = std::chrono::high_resolution_clock::now();
 			delete mpAPI;
 		}
@@ -252,7 +453,7 @@ namespace SemanticSLAM {
 		//std::cout << "ShareContent end" << std::endl;
 		pUser->mnDebugAR--;
 		pUser->mnUsed--;
-		
+		//std::cout << "commu test = " << nConnect << " " << nContent << std::endl;
 	}
 
 	void ContentProcessor::DrawContentProcess(EdgeSLAM::SLAM* SLAM, std::string user, int id, std::string kewword, int mid) {
@@ -274,34 +475,83 @@ namespace SemanticSLAM {
 		auto res = mpAPI->Send(ss.str(), "");
 		int n2 = res.size();
 		
-		cv::Mat fdata = cv::Mat::zeros(n2/4, 1, CV_32FC1);
-		std::memcpy(fdata.data, res.data(), res.size());
+		cv::Mat fdata = cv::Mat(n2/4, 1, CV_32FC1, (void*)res.data());
+		//std::memcpy(fdata.data, res.data(), res.size());
 		DrawContentRegistration(SLAM, pKF, user, fdata, mid);
 		pUser->mnUsed--;
 	}
-	void ContentProcessor::ContentProcess(EdgeSLAM::SLAM* SLAM, std::string user, int id, std::string kewword, int mid) {
+	void ContentProcessor::DirectCommuTest(EdgeSLAM::SLAM* SLAM, EdgeSLAM::User* USER, cv::Mat& data, int id, double ts, int N) {
+		std::string name = USER->userName;
+		long long du_upload =  Utils::SendData("dr", name, data, id, ts);
+		
+		if (mbSaveLatency)
+		{
+			std::stringstream ss;
+			// "num,source,method,type,id,quality,size,latency\n";
+			ss << N << "," << name << "," << "direct,upload," << id << "," << data.rows * sizeof(float) << "," << du_upload << std::endl;
+			SLAM->EvaluationVirtualObjectLatency.push_back(ss.str());
+		}
+	}
+	void ContentProcessor::ContentProcess(EdgeSLAM::SLAM* SLAM, std::string user, int id, std::string kewword, double ts, int mid) {
 		auto pUser = SLAM->GetUser(user);
 		if (!pUser)
 			return;
-		pUser->mnUsed++;
-		pUser->mnDebugAR++;
 		auto pKF = pUser->mpRefKF;
 		if (!pKF) {
-			pUser->mnUsed--;
 			return;
 		}
-		//auto pMap = SLAM->GetMap(pUser->mapName);
-
+		pUser->mnUsed++;
+		pUser->mnDebugAR++;
+		
+		//t1 = down start
+		//t2 = down end
+		//t3 = registration end
+		std::chrono::high_resolution_clock::time_point t1 = std::chrono::high_resolution_clock::now();
 		std::stringstream ss;
 		ss << "/Load?keyword="<< kewword << "&id=" << id << "&src=" << user;
 		WebAPI* mpAPI = new WebAPI("143.248.6.143", 35005);
 		auto res = mpAPI->Send(ss.str(), "");
+		std::chrono::high_resolution_clock::time_point t2 = std::chrono::high_resolution_clock::now();
 		int n2 = res.size();
 		cv::Mat fdata = cv::Mat(n2 / 4, 1, CV_32FC1, (void*)res.data());
-		/*cv::Mat fdata = cv::Mat::zeros(n2/4, 1, CV_32FC1);
-		std::memcpy(fdata.data, res.data(), res.size());*/
+		
+		std::chrono::high_resolution_clock::time_point t3;
+		if (pUser->mbVOSyncTest) {
+			int newVOID = SimulRegistration(SLAM, user, fdata, mid);
+			t3 = std::chrono::high_resolution_clock::now();
+			auto vecAllUsers = SLAM->GetAllUsersInMap(pUser->mapName);
+			//바로 모든 기기에 전송해야 함. 
+			//전송 기록 측정
+			//std::cout << "content data = " << id << std::endl;
+			for (int i = 0, iend = vecAllUsers.size(); i < iend; i++) {
+				auto tempUser = vecAllUsers[i];
+				if (!tempUser)
+					continue;
+				tempUser->mnUsed++;
+				SLAM->pool->EnqueueJob(DirectCommuTest, SLAM, tempUser, fdata, id, ts, iend);
+				tempUser->mnUsed--;
+			}
+			//std::cout << "content data end" << std::endl;
+		}
+		else {
+			int nContentKFs = 100;//pUser->mnContentKFs;
+			int newVOID = ContentRegistration(SLAM, pKF, user, fdata, mid, nContentKFs);
+			t3 = std::chrono::high_resolution_clock::now();
+		}
 
-		ContentRegistration(SLAM, pKF, user, fdata, mid);
+		if(mbSaveLatency)
+		{
+			auto vecAllUsers = SLAM->GetAllUsersInMap(pUser->mapName);
+			int N = vecAllUsers.size();
+			auto du_down = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+			//auto du_registration = std::chrono::duration_cast<std::chrono::milliseconds>(t3-t2).count();
+			std::stringstream ss;
+			// "num,source,method,type,id,quality,size,latency\n";
+			ss << N << "," << user << "," << "vo,download," << id << "," << res.size() << "," << du_down << std::endl;
+			//ss << N << "," << user << "," << "vo," << id << "," << "download" << "," << res.size() << "," << du_down <<","<<du_registration <<","<<t1.time_since_epoch().count() << std::endl;
+			SLAM->EvaluationVirtualObjectLatency.push_back(ss.str());
+		}
+		
 		pUser->mnDebugAR--;
 		pUser->mnUsed--;
 	}
@@ -369,32 +619,39 @@ namespace SemanticSLAM {
 		long long ts = start.time_since_epoch().count();
 
 		auto pNewContent = new Content(data, user, mid, ts);
-		/*cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
-		X.at<float>(0) = data.at<float>(0);
-		X.at<float>(1) = data.at<float>(1);
-		X.at<float>(2) = data.at<float>(2);
-		cv::Mat X2 = cv::Mat::zeros(3, 1, CV_32FC1);
-		X2.at<float>(0) = data.at<float>(3);
-		X2.at<float>(1) = data.at<float>(4);
-		X2.at<float>(2) = data.at<float>(5);
-		auto pNewContent = new Content(X, user, mid);
-		pNewContent->attribute.at<float>(0, 0) = 2.0;
-		pNewContent->endPos = X2;
-		pNewContent->mnMarkerID = (int)data.at<float>(6);*/
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
-
-		//std::cout << "draw = " << data.at<float>(7) << "," << data.at<float>(8) << std::endl;
-
-		std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(100);
-		vpLocalKFs.push_back(pKF);
-		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
-			auto pKFi = *iter;
-			std::map<int, Content*> mapContents;
-			if (ContentMap.Count(pKFi))
-				mapContents = ContentMap.Get(pKFi);
-			mapContents[pNewContent->mnID] = pNewContent;
-			ContentMap.Update(pKFi, mapContents);
+		
+		//KF
+		if(false)
+		{
+			std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(100);
+			vpLocalKFs.push_back(pKF);
+			for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
+				auto pKFi = *iter;
+				std::map<int, Content*> mapContents;
+				if (ContentMap.Count(pKFi))
+					mapContents = ContentMap.Get(pKFi);
+				mapContents[pNewContent->mnID] = pNewContent;
+				ContentMap.Update(pKFi, mapContents);
+			}
 		}
+		
+		//GRID
+		//그리드
+		{
+			/*std::map<int, cv::Mat> mapDatas;
+			if (SLAM->TemporalDatas2.Count("content"))
+				mapDatas = SLAM->TemporalDatas2.Get("content");*/
+			cv::Mat X = cv::Mat::zeros(3, 1, CV_32FC1);
+			X.at<float>(0) = data.at<float>(4);
+			X.at<float>(1) = -data.at<float>(5);
+			X.at<float>(2) = data.at<float>(6);
+			pNewContent->mpGrid = GridProcessor::GetGrid(X);
+			pNewContent->mpGrid->ConnectedVOs.Update(pNewContent);
+			/*mapDatas[pNewContent->mnID] = X;
+			SLAM->TemporalDatas2.Update("content", mapDatas);*/
+		}
+
 		/*{
 			std::map<int, cv::Mat> mapDatas;
 			if (SLAM->TemporalDatas2.Count("drawcontent"))
@@ -407,7 +664,14 @@ namespace SemanticSLAM {
 		}*/
 		
 	}
-	int ContentProcessor::ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, const cv::Mat& data, int mid) {
+	int ContentProcessor::SimulRegistration(EdgeSLAM::SLAM* SLAM, std::string user, const cv::Mat& data, int mid) {
+		std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
+		long long ts = start.time_since_epoch().count();
+		auto pNewContent = new Content(data, user, mid, ts);
+		AllContentMap.Update(pNewContent->mnID, pNewContent);
+		return pNewContent->mnID;
+	}
+	int ContentProcessor::ContentRegistration(EdgeSLAM::SLAM* SLAM, EdgeSLAM::KeyFrame* pKF, std::string user, const cv::Mat& data, int mid, int nKF) {
 		
 		std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
 		long long ts = start.time_since_epoch().count();
@@ -416,17 +680,20 @@ namespace SemanticSLAM {
 		//std::cout <<"Add = " << data.t() << std::endl;
 		AllContentMap.Update(pNewContent->mnID, pNewContent);
 		
-		/*std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs =  pKF->GetBestCovisibilityKeyFrames(100);
-		vpLocalKFs.push_back(pKF);
-		for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
-			auto pKFi = *iter;
-			std::map<int, Content*> mapContents;
-			if (ContentMap.Count(pKFi))
-				mapContents = ContentMap.Get(pKFi);
-			mapContents[pNewContent->mnID] = pNewContent;
-			ContentMap.Update(pKFi, mapContents);
-		}*/
-
+		//키프레임
+		{
+			std::vector<EdgeSLAM::KeyFrame*> vpLocalKFs = pKF->GetBestCovisibilityKeyFrames(nKF);
+			vpLocalKFs.push_back(pKF);
+			for (auto iter = vpLocalKFs.begin(), iend = vpLocalKFs.end(); iter != iend; iter++) {
+				auto pKFi = *iter;
+				std::map<int, Content*> mapContents;
+				if (ContentMap.Count(pKFi))
+					mapContents = ContentMap.Get(pKFi);
+				mapContents[pNewContent->mnID] = pNewContent;
+				ContentMap.Update(pKFi, mapContents);
+			}
+		}
+		//그리드
 		{
 			std::map<int, cv::Mat> mapDatas;
 			if (SLAM->TemporalDatas2.Count("content"))
@@ -441,7 +708,7 @@ namespace SemanticSLAM {
 			pNewContent->mpGrid = GridProcessor::GetGrid(X);
 			pNewContent->mpGrid->ConnectedVOs.Update(pNewContent);
 		}
-
+		
 		//std::cout << "temp content" << data.at<float>(0) << " " << data.at<float>(1) << " " << data.at<float>(5) << " " << data.at<float>(7) << " || " << data.at<float>(6) << " " << data.at<float>(8) << std::endl;
 		//std::cout << "temp content POS = " << data.at<float>(2) << " " << data.at<float>(3) << " " << data.at<float>(4) << " " << data.at<float>(5) << " " << data.at<float>(6) << std::endl;
 		return pNewContent->mnID;
